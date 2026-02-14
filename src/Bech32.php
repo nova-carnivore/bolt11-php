@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin;
+namespace Nova\Bitcoin\Bolt11;
 
-use Nova\Bitcoin\Exception\InvalidChecksumException;
-use Nova\Bitcoin\Exception\InvalidInvoiceException;
+use Nova\Bitcoin\Bolt11\Exception\InvalidChecksumException;
+use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
 
 /**
  * Bech32 encoding/decoding for BOLT 11 payment requests.

@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin;
+namespace Nova\Bitcoin\Bolt11;
 
-use Elliptic\EC;
-use Nova\Bitcoin\Exception\InvalidInvoiceException;
-use Nova\Bitcoin\Exception\InvalidSignatureException;
+use Mdanter\Ecc\EccFactory;
+use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
+use Nova\Bitcoin\Bolt11\Exception\InvalidSignatureException;
 
 /**
  * BOLT 11 payment request decoder.
@@ -257,9 +257,8 @@ final class Decoder
     }
 
     /**
-     * Recover compressed public key from compact signature.
+     * Recover compressed public key from compact signature using paragonie/ecc.
      *
-     * Uses the elliptic-php library for secp256k1 operations.
      * Handles both low-S and high-S signatures.
      *
      * @param list<int> $msgHash 32-byte hash
@@ -268,52 +267,43 @@ final class Decoder
      */
     private static function recoverPublicKey(array $msgHash, array $signature, int $recoveryFlag): ?string
     {
-        $ec = new EC('secp256k1');
+        $generator = EccFactory::getSecgCurves()->generator256k1();
+        $adapter = EccFactory::getAdapter();
 
         $hashHex = Bech32::bytesToHex($msgHash);
         $rHex = Bech32::bytesToHex(array_slice($signature, 0, 32));
         $sHex = Bech32::bytesToHex(array_slice($signature, 32, 32));
 
+        $hashGmp = gmp_init($hashHex, 16);
+        $r = gmp_init($rHex, 16);
+        $s = gmp_init($sHex, 16);
+
         // secp256k1 curve order
-        $n = gmp_init('fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141', 16);
+        $n = $generator->getOrder();
         $halfN = gmp_div_q($n, 2);
 
-        $sGmp = gmp_init($sHex, 16);
-        $isHighS = gmp_cmp($sGmp, $halfN) > 0;
-
-        $sigObj = ['r' => $rHex, 's' => $sHex];
+        $isHighS = gmp_cmp($s, $halfN) > 0;
 
         if (!$isHighS) {
             // Standard low-S: use flag as-is
             try {
-                $point = $ec->recoverPubKey($hashHex, $sigObj, $recoveryFlag);
-                $key = $ec->keyFromPublic($point);
-
-                return $key->getPublic(true, 'hex');
+                return Secp256k1Recovery::recoverPublicKey($generator, $adapter, $hashGmp, $r, $s, $recoveryFlag);
             } catch (\Throwable) {
                 // Fall through
             }
         } else {
             // High-S: try with inverted flag first
             try {
-                $point = $ec->recoverPubKey($hashHex, $sigObj, $recoveryFlag ^ 1);
-                $key = $ec->keyFromPublic($point);
-
-                return $key->getPublic(true, 'hex');
+                return Secp256k1Recovery::recoverPublicKey($generator, $adapter, $hashGmp, $r, $s, $recoveryFlag ^ 1);
             } catch (\Throwable) {
                 // Fall through
             }
 
             // Try with normalized S
             try {
-                $sNorm = gmp_sub($n, $sGmp);
-                $sNormHex = str_pad(gmp_strval($sNorm, 16), 64, '0', STR_PAD_LEFT);
-                $normalizedSig = ['r' => $rHex, 's' => $sNormHex];
+                $sNorm = gmp_sub($n, $s);
 
-                $point = $ec->recoverPubKey($hashHex, $normalizedSig, $recoveryFlag);
-                $key = $ec->keyFromPublic($point);
-
-                return $key->getPublic(true, 'hex');
+                return Secp256k1Recovery::recoverPublicKey($generator, $adapter, $hashGmp, $r, $sNorm, $recoveryFlag);
             } catch (\Throwable) {
                 // Fall through
             }

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin;
+namespace Nova\Bitcoin\Bolt11;
 
-use Nova\Bitcoin\Exception\InvalidAmountException;
+use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
 
 /**
  * Represents a BOLT 11 payment amount.

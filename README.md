@@ -18,6 +18,7 @@ Modern PHP 8.3+ BOLT 11 Lightning Network invoice encoder/decoder. Full spec com
 - 🏷️ **All tag types** — payment_hash, description, route hints, feature bits, metadata, and more
 - 🔄 **Round-trip safe** — Encode → sign → decode preserves all data
 - 📏 **PSR-12 code style** — Enforced with PHP-CS-Fixer
+- 🔒 **Security-hardened crypto** — Uses paragonie/ecc with constant-time operations
 
 ## Installation
 
@@ -28,14 +29,14 @@ composer require nova-carnivore/bolt11-php
 ### Requirements
 
 - PHP 8.3 or higher
-- ext-gmp (required by elliptic-php dependency)
+- ext-gmp (required by paragonie/ecc)
 
 ## Quick Start
 
 ### Decode an Invoice
 
 ```php
-use Nova\Bitcoin\Decoder;
+use Nova\Bitcoin\Bolt11\Decoder;
 
 $invoice = Decoder::decode('lnbc2500u1pvjluez...');
 
@@ -56,9 +57,9 @@ $invoice->getTag('payment_hash'); // Tag object
 ### Encode an Invoice
 
 ```php
-use Nova\Bitcoin\Encoder;
-use Nova\Bitcoin\Network;
-use Nova\Bitcoin\Tag;
+use Nova\Bitcoin\Bolt11\Encoder;
+use Nova\Bitcoin\Bolt11\Network;
+use Nova\Bitcoin\Bolt11\Tag;
 
 $unsigned = Encoder::encode(
     network: Network::Bitcoin,
@@ -75,7 +76,7 @@ $unsigned = Encoder::encode(
 ### Sign an Invoice
 
 ```php
-use Nova\Bitcoin\Signer;
+use Nova\Bitcoin\Bolt11\Signer;
 
 $signed = Signer::sign($unsigned, $privateKeyHex);
 
@@ -87,7 +88,7 @@ $signed->payeeNodeKey;   // compressed public key
 ### Amount Helpers
 
 ```php
-use Nova\Bitcoin\Helpers;
+use Nova\Bitcoin\Bolt11\Helpers;
 
 Helpers::satToHrp(250000);       // '2500u'
 Helpers::hrpToSat('2500u');      // '250000'
@@ -212,7 +213,7 @@ All 12 official test vectors pass:
 ## Exception Handling
 
 ```php
-use Nova\Bitcoin\Exception\{
+use Nova\Bitcoin\Bolt11\Exception\{
     Bolt11Exception,           // Base exception
     InvalidInvoiceException,   // Malformed invoice
     InvalidChecksumException,  // Bad bech32 checksum
@@ -255,20 +256,21 @@ vendor/bin/php-cs-fixer fix
 
 ```
 src/
-├── Decoder.php          # Main decoder
-├── Encoder.php          # Main encoder
-├── Signer.php           # Invoice signing (secp256k1)
-├── Invoice.php          # Immutable value object
-├── Tag.php              # Tag value object with factory methods
-├── TagType.php          # Tag type enum
-├── Network.php          # Network enum (Bitcoin, Testnet, Signet, Regtest)
-├── Multiplier.php       # Amount multiplier enum (m, u, n, p)
-├── Amount.php           # Amount value object
-├── RouteHint.php        # Route hint value object
-├── FallbackAddress.php  # Fallback address value object
-├── FeatureBits.php      # Feature bits handler
-├── Bech32.php           # Bech32 encoder/decoder
-├── Helpers.php          # Static helper methods
+├── Decoder.php            # Main decoder
+├── Encoder.php            # Main encoder
+├── Signer.php             # Invoice signing (secp256k1)
+├── Secp256k1Recovery.php  # ECDSA public key recovery
+├── Invoice.php            # Immutable value object
+├── Tag.php                # Tag value object with factory methods
+├── TagType.php            # Tag type enum
+├── Network.php            # Network enum (Bitcoin, Testnet, Signet, Regtest)
+├── Multiplier.php         # Amount multiplier enum (m, u, n, p)
+├── Amount.php             # Amount value object
+├── RouteHint.php          # Route hint value object
+├── FallbackAddress.php    # Fallback address value object
+├── FeatureBits.php        # Feature bits handler
+├── Bech32.php             # Bech32 encoder/decoder
+├── Helpers.php            # Static helper methods
 └── Exception/
     ├── Bolt11Exception.php
     ├── InvalidInvoiceException.php

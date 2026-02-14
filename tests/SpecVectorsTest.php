@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin\Tests;
+namespace Nova\Bitcoin\Bolt11\Tests;
 
-use Nova\Bitcoin\Decoder;
+use Nova\Bitcoin\Bolt11\Decoder;
 use PHPUnit\Framework\TestCase;
 
 /**

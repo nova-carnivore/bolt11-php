@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin\Tests;
+namespace Nova\Bitcoin\Bolt11\Tests;
 
-use Nova\Bitcoin\Bech32;
-use Nova\Bitcoin\Exception\InvalidChecksumException;
-use Nova\Bitcoin\Exception\InvalidInvoiceException;
+use Nova\Bitcoin\Bolt11\Bech32;
+use Nova\Bitcoin\Bolt11\Exception\InvalidChecksumException;
+use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
 use PHPUnit\Framework\TestCase;
 
 /**

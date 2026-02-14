@@ -21,7 +21,8 @@
     ],
     "require": {
         "php": "^8.3",
-        "simplito/elliptic-php": "^1.0"
+        "ext-gmp": "*",
+        "paragonie/ecc": "^2.0"
     },
     "require-dev": {
         "phpunit/phpunit": "^11.0",
@@ -30,12 +31,12 @@
     },
     "autoload": {
         "psr-4": {
-            "Nova\\Bitcoin\\": "src/"
+            "Nova\\Bitcoin\\Bolt11\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Nova\\Bitcoin\\Tests\\": "tests/"
+            "Nova\\Bitcoin\\Bolt11\\Tests\\": "tests/"
         }
     },
     "scripts": {

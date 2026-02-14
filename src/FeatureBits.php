@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin;
+namespace Nova\Bitcoin\Bolt11;
 
 /**
  * Represents feature bits from a BOLT 11 invoice.

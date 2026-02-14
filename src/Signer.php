@@ -2,10 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin;
+namespace Nova\Bitcoin\Bolt11;
 
-use Elliptic\EC;
-use Nova\Bitcoin\Exception\InvalidSignatureException;
+use GMP;
+use Mdanter\Ecc\Crypto\Key\PrivateKeyInterface;
+use Mdanter\Ecc\Crypto\Signature\Signature;
+use Mdanter\Ecc\Crypto\Signature\Signer as EccSigner;
+use Mdanter\Ecc\EccFactory;
+use Mdanter\Ecc\Primitives\GeneratorPoint;
+use Mdanter\Ecc\Random\RandomGeneratorFactory;
+use Nova\Bitcoin\Bolt11\Exception\InvalidSignatureException;
 
 /**
  * Signs BOLT 11 payment requests using secp256k1.
@@ -22,7 +28,8 @@ final class Signer
      */
     public static function sign(Invoice $invoice, string $privateKeyHex): Invoice
     {
-        $ec = new EC('secp256k1');
+        $generator = EccFactory::getSecgCurves()->generator256k1();
+        $adapter = EccFactory::getAdapter();
 
         $network = $invoice->network ?? Network::Bitcoin;
         $hrp = Encoder::buildHRP($network, $invoice->satoshis, $invoice->millisatoshis);
@@ -41,16 +48,37 @@ final class Signer
         }
         $sigHash = hash('sha256', $binary, true);
 
-        // Sign with secp256k1
-        $key = $ec->keyFromPrivate($privateKeyHex, 'hex');
-        $sig = $key->sign(bin2hex($sigHash), ['canonical' => true]);
+        // Create private key
+        $privateKeyGmp = gmp_init($privateKeyHex, 16);
+        $key = $generator->getPrivateKeyFrom($privateKeyGmp);
 
-        $rHex = str_pad($sig->r->toString(16), 64, '0', STR_PAD_LEFT);
-        $sHex = str_pad($sig->s->toString(16), 64, '0', STR_PAD_LEFT);
+        // Create hash as GMP for signing
+        $hashGmp = gmp_init(bin2hex($sigHash), 16);
+        $hashGmp = self::truncateHash($hashGmp, $generator);
+
+        // Sign with deterministic k (RFC 6979)
+        $random = RandomGeneratorFactory::getHmacRandomGenerator($key, $hashGmp, 'sha256');
+        $randomK = $random->generate($generator->getOrder());
+
+        $signer = new EccSigner($adapter);
+        $sig = $signer->sign($key, $hashGmp, $randomK);
+
+        // Enforce low-S
+        $n = $generator->getOrder();
+        $halfN = gmp_div_q($n, 2);
+        $s = $sig->getS();
+        $r = $sig->getR();
+        if (gmp_cmp($s, $halfN) > 0) {
+            $s = gmp_sub($n, $s);
+            $sig = new Signature($r, $s);
+        }
+
+        $rHex = str_pad(gmp_strval($r, 16), 64, '0', STR_PAD_LEFT);
+        $sHex = str_pad(gmp_strval($s, 16), 64, '0', STR_PAD_LEFT);
         $signature = Bech32::hexToBytes($rHex . $sHex);
 
         // Determine recovery flag
-        $recoveryFlag = self::findRecoveryFlag($ec, $sigHash, $rHex, $sHex, $privateKeyHex);
+        $recoveryFlag = self::findRecoveryFlag($generator, $adapter, $sigHash, $r, $s, $key);
 
         // Signature → 5-bit words: 64 bytes → 103 words, then recovery flag as 104th word
         $sigWords = Bech32::eightToFive($signature);
@@ -64,8 +92,11 @@ final class Signer
         $paymentRequest = Bech32::encode($hrp, $allWords);
 
         // Get public key
-        $pubPoint = $key->getPublic();
-        $pubKeyHex = $pubPoint->encode('hex', true);
+        $pubPoint = $key->getPublicKey()->getPoint();
+        $x = gmp_strval($pubPoint->getX(), 16);
+        $x = str_pad($x, 64, '0', STR_PAD_LEFT);
+        $prefix = gmp_cmp(gmp_mod($pubPoint->getY(), gmp_init(2)), gmp_init(0)) === 0 ? '02' : '03';
+        $pubKeyHex = $prefix . $x;
 
         return $invoice->with(
             complete: true,
@@ -78,27 +109,66 @@ final class Signer
     }
 
     /**
+     * Truncate hash to the bit length of the curve order (per ECDSA spec).
+     */
+    private static function truncateHash(GMP $hash, GeneratorPoint $generator): GMP
+    {
+        $order = $generator->getOrder();
+        $orderBitLen = self::gmpBitLength($order);
+        $hashBitLen = self::gmpBitLength($hash);
+
+        if ($hashBitLen > $orderBitLen) {
+            $hash = gmp_div_q($hash, gmp_pow(gmp_init(2), $hashBitLen - $orderBitLen));
+        }
+
+        return $hash;
+    }
+
+    /**
+     * Get the bit length of a GMP number.
+     */
+    private static function gmpBitLength(GMP $n): int
+    {
+        if (gmp_cmp($n, 0) === 0) {
+            return 0;
+        }
+
+        $hex = gmp_strval($n, 16);
+
+        return strlen($hex) * 4;
+    }
+
+    /**
      * Find the correct recovery flag by trying each possibility.
+     *
+     * @param GeneratorPoint $generator
+     * @param \Mdanter\Ecc\Math\GmpMathInterface $adapter
+     * @param string $sigHash Raw binary hash
+     * @param GMP $r
+     * @param GMP $s
+     * @param PrivateKeyInterface $key
+     * @return int
+     * @throws InvalidSignatureException
      */
     private static function findRecoveryFlag(
-        EC $ec,
+        GeneratorPoint $generator,
+        \Mdanter\Ecc\Math\GmpMathInterface $adapter,
         string $sigHash,
-        string $rHex,
-        string $sHex,
-        string $privateKeyHex,
+        GMP $r,
+        GMP $s,
+        PrivateKeyInterface $key,
     ): int {
-        $key = $ec->keyFromPrivate($privateKeyHex, 'hex');
-        $expectedPubHex = $key->getPublic()->encode('hex', true);
-        $hashHex = bin2hex($sigHash);
-        $sigObj = ['r' => $rHex, 's' => $sHex];
+        $expectedPoint = $key->getPublicKey()->getPoint();
+        $expectedX = str_pad(gmp_strval($expectedPoint->getX(), 16), 64, '0', STR_PAD_LEFT);
+        $expectedPrefix = gmp_cmp(gmp_mod($expectedPoint->getY(), gmp_init(2)), gmp_init(0)) === 0 ? '02' : '03';
+        $expectedPubHex = $expectedPrefix . $expectedX;
+
+        $hashGmp = gmp_init(bin2hex($sigHash), 16);
 
         for ($flag = 0; $flag <= 3; $flag++) {
             try {
-                $point = $ec->recoverPubKey($hashHex, $sigObj, $flag);
-                $recoveredKey = $ec->keyFromPublic($point);
-                $recoveredHex = $recoveredKey->getPublic(true, 'hex');
-
-                if ($recoveredHex === $expectedPubHex) {
+                $recovered = Secp256k1Recovery::recoverPublicKey($generator, $adapter, $hashGmp, $r, $s, $flag);
+                if ($recovered === $expectedPubHex) {
                     return $flag;
                 }
             } catch (\Throwable) {

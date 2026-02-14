@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin\Tests;
+namespace Nova\Bitcoin\Bolt11\Tests;
 
-use Nova\Bitcoin\Exception\InvalidAmountException;
-use Nova\Bitcoin\Helpers;
+use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
+use Nova\Bitcoin\Bolt11\Helpers;
 use PHPUnit\Framework\TestCase;
 
 /**

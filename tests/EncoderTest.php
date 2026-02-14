@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Nova\Bitcoin\Tests;
+namespace Nova\Bitcoin\Bolt11\Tests;
 
-use Nova\Bitcoin\Encoder;
-use Nova\Bitcoin\Exception\InvalidInvoiceException;
-use Nova\Bitcoin\Network;
-use Nova\Bitcoin\Signer;
-use Nova\Bitcoin\Tag;
+use Nova\Bitcoin\Bolt11\Encoder;
+use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
+use Nova\Bitcoin\Bolt11\Network;
+use Nova\Bitcoin\Bolt11\Signer;
+use Nova\Bitcoin\Bolt11\Tag;
 use PHPUnit\Framework\TestCase;
 
 /**

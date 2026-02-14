@@ -44,7 +44,7 @@ final class Signer
 
         $binary = '';
         foreach ($signingData as $b) {
-            $binary .= chr($b);
+            $binary .= chr($b & 0xFF);
         }
         $sigHash = hash('sha256', $binary, true);
 

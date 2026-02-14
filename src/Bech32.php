@@ -288,7 +288,7 @@ final class Bech32
     {
         $str = '';
         foreach ($bytes as $b) {
-            $str .= chr($b);
+            $str .= chr($b & 0xFF);
         }
 
         return $str;

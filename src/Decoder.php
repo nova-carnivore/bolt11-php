@@ -322,7 +322,7 @@ final class Decoder
     {
         $binary = '';
         foreach ($bytes as $b) {
-            $binary .= chr($b);
+            $binary .= chr($b & 0xFF);
         }
 
         $hash = hash('sha256', $binary, true);

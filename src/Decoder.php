@@ -63,6 +63,7 @@ final class Decoder
 
         // Parse tags
         $tags = self::parseTags($tagWords);
+        self::validateRequiredTagPresence($tags);
 
         // Extract signature
         $sigBytes = Bech32::fiveToEightTrim(array_slice($signatureWords, 0, 103));
@@ -117,6 +118,52 @@ final class Decoder
             tags: $tags,
             paymentRequest: $paymentRequest,
         );
+    }
+
+    /**
+     * Spec-required reader checks on the parsed tag set:
+     *
+     *   - At least one valid `p` (payment_hash) tag MUST be present. If the
+     *     invoice contained only wrong-length `p` candidates, parseTags will
+     *     have skipped them all and we fail here. (Same applies to `s`, `n`.)
+     *   - A reader MUST fail the payment if a valid `s` tag is not provided.
+     *   - A reader MUST fail the payment if neither `d` nor `h` is present,
+     *     or if both are present.
+     *
+     * @param list<Tag> $tags
+     */
+    private static function validateRequiredTagPresence(array $tags): void
+    {
+        $hasPaymentHash = false;
+        $hasPaymentSecret = false;
+        $hasDescription = false;
+        $hasDescriptionHash = false;
+        foreach ($tags as $tag) {
+            match ($tag->tagName) {
+                'payment_hash' => $hasPaymentHash = true,
+                'payment_secret' => $hasPaymentSecret = true,
+                'description' => $hasDescription = true,
+                'purpose_commit_hash' => $hasDescriptionHash = true,
+                default => null,
+            };
+        }
+
+        if (!$hasPaymentHash) {
+            throw new InvalidInvoiceException('Invoice must contain a payment_hash (p) tag');
+        }
+        if (!$hasPaymentSecret) {
+            throw new InvalidInvoiceException('Invoice must contain a payment_secret (s) tag');
+        }
+        if (!$hasDescription && !$hasDescriptionHash) {
+            throw new InvalidInvoiceException(
+                'Invoice must contain a description (d) or description_hash (h) tag',
+            );
+        }
+        if ($hasDescription && $hasDescriptionHash) {
+            throw new InvalidInvoiceException(
+                'Invoice must not contain both description (d) and description_hash (h) tags',
+            );
+        }
     }
 
     /**
@@ -178,6 +225,10 @@ final class Decoder
     }
 
     /**
+     * Per spec test vector 12, a `p`/`h`/`s` tag with the wrong data_length is
+     * silently skipped (not a hard failure). The required-presence check
+     * after parseTags catches the case where every candidate is wrong-length.
+     *
      * @param list<int> $words
      */
     private static function parseHashTag(string $name, array $words, int $dataLen): ?Tag
@@ -190,6 +241,8 @@ final class Decoder
     }
 
     /**
+     * Same wrong-length-skip rule as parseHashTag, but for the 53-word `n` tag.
+     *
      * @param list<int> $words
      */
     private static function parsePayeeTag(array $words, int $dataLen): ?Tag

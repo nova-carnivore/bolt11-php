@@ -6,9 +6,11 @@ namespace Nova\Bitcoin\Bolt11\Tests;
 
 use Nova\Bitcoin\Bolt11\Bech32;
 use Nova\Bitcoin\Bolt11\Decoder;
+use Nova\Bitcoin\Bolt11\Encoder;
 use Nova\Bitcoin\Bolt11\Exception\InvalidChecksumException;
 use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
 use Nova\Bitcoin\Bolt11\Exception\InvalidSignatureException;
+use Nova\Bitcoin\Bolt11\Tag;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -84,6 +86,79 @@ final class DecoderTest extends TestCase
         $this->expectExceptionMessage('recovery flag');
 
         Decoder::decode($tampered);
+    }
+
+    /**
+     * Build a syntactically valid bech32 invoice from a list of tags and a
+     * dummy (all-zero) signature. The invoice is well-formed at the bech32
+     * layer but won't pass signature validation; tests use it to exercise
+     * checks that run *before* signature recovery.
+     *
+     * @param list<Tag> $tags
+     */
+    private function craftInvoice(array $tags, string $hrp = 'lnbc'): string
+    {
+        $words = [
+            ...Bech32::intToWords(1700000000, 7),
+            ...Encoder::encodeAllTags($tags),
+            ...array_fill(0, 104, 0),
+        ];
+
+        return Bech32::encode($hrp, $words);
+    }
+
+    public function testMissingPaymentHashRejected(): void
+    {
+        $invoice = $this->craftInvoice([
+            Tag::paymentSecret('1111111111111111111111111111111111111111111111111111111111111111'),
+            Tag::description('no p tag'),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('payment_hash');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testMissingPaymentSecretRejected(): void
+    {
+        $invoice = $this->craftInvoice([
+            Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+            Tag::description('no s tag'),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('payment_secret');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testMissingDescriptionAndHashRejected(): void
+    {
+        $invoice = $this->craftInvoice([
+            Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+            Tag::paymentSecret('1111111111111111111111111111111111111111111111111111111111111111'),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('description');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testBothDescriptionAndHashRejected(): void
+    {
+        $invoice = $this->craftInvoice([
+            Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+            Tag::paymentSecret('1111111111111111111111111111111111111111111111111111111111111111'),
+            Tag::description('cannot have both'),
+            Tag::descriptionHash('3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1'),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('both');
+
+        Decoder::decode($invoice);
     }
 
     /**

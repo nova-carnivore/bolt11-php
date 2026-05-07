@@ -249,14 +249,17 @@ final class Decoder
     }
 
     /**
-     * Recover the payee's public key from the signature, and — if an explicit
-     * `n` tag is present — verify it matches the recovered key.
+     * Resolve the payee's public key from the signature, honouring BOLT 11's
+     * branching reader requirements:
      *
-     * Per BOLT 11, a reader MUST check that the signature is valid. With or
-     * without an `n` field, that requires successful ECDSA key recovery.
-     * When `n` is provided, it MUST equal the recovered key; trusting the
-     * tag without verification would let a forged invoice present any pubkey
-     * alongside an unrelated signature.
+     *   - if a valid `n` tag is provided: the tag MUST be used to validate the
+     *     signature, AND the signature MUST be low-S. (We implement the
+     *     "validate" step as recover-and-compare, which is functionally
+     *     equivalent to ECDSA verification when the signature is low-S.)
+     *   - otherwise: perform ECDSA public-key recovery, accepting both
+     *     high-S and low-S signatures.
+     *
+     * Spec: https://github.com/lightning/bolts/blob/master/11-payment-encoding.md
      *
      * @param list<int> $sigHash SHA-256 hash bytes
      * @param list<int> $sigBytes 64-byte compact signature
@@ -265,25 +268,46 @@ final class Decoder
      */
     private static function resolvePayeeKey(array $sigHash, array $sigBytes, int $recoveryFlag, array $tags): ?string
     {
-        $recovered = self::recoverPublicKey($sigHash, $sigBytes, $recoveryFlag);
-
+        $explicit = null;
         foreach ($tags as $tag) {
-            if ($tag->tagName !== 'payee' || !is_string($tag->data)) {
-                continue;
+            if ($tag->tagName === 'payee' && is_string($tag->data)) {
+                $explicit = $tag->data;
+                break;
             }
-            if ($recovered === null) {
-                return null;
+        }
+
+        if ($explicit !== null) {
+            if (self::isHighS($sigBytes)) {
+                throw new InvalidSignatureException(
+                    'high-S signature is not valid when payee node key (n) tag is present',
+                );
             }
-            if (strtolower($tag->data) !== strtolower($recovered)) {
+
+            $recovered = self::recoverPublicKey($sigHash, $sigBytes, $recoveryFlag);
+            if ($recovered === null || strtolower($recovered) !== strtolower($explicit)) {
                 throw new InvalidSignatureException(
                     'payee node key tag does not match the key recovered from the signature',
                 );
             }
 
-            return $tag->data;
+            return $explicit;
         }
 
-        return $recovered;
+        return self::recoverPublicKey($sigHash, $sigBytes, $recoveryFlag);
+    }
+
+    /**
+     * Detect whether a compact ECDSA signature uses a high-S value (S > n/2).
+     *
+     * @param list<int> $sigBytes 64-byte compact R||S signature
+     */
+    private static function isHighS(array $sigBytes): bool
+    {
+        $sHex = Bech32::bytesToHex(array_slice($sigBytes, 32, 32));
+        $s = gmp_init($sHex, 16);
+        $halfN = gmp_div_q(EccFactory::getSecgCurves()->generator256k1()->getOrder(), 2);
+
+        return gmp_cmp($s, $halfN) > 0;
     }
 
     /**

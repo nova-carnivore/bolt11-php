@@ -21,12 +21,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validate the signer, instead of returning a partially-decoded invoice.
   Previously the decoder hardcoded `complete: true` after every decode,
   silently producing invoices with `payeeNodeKey === null`.
-- **Verify the `n` tag against the recovered key.** Previously
-  `Decoder::resolvePayeeKey()` returned the value of any `n` tag without
-  checking it; an attacker could pair any pubkey with an unrelated valid
-  signature. The decoder now always performs ECDSA recovery, and when an
-  `n` tag is present requires it to equal the recovered key
-  (case-insensitive hex). A mismatch raises `InvalidSignatureException`.
+- **Validate the signature against an explicit `n` tag, and reject high-S
+  signatures in that branch.** BOLT 11 §"Tagged Fields → Requirements"
+  states: "if a valid `n` field is provided: MUST use the `n` field to
+  validate the signature instead of performing public-key recovery. If
+  the signature is not compliant with the low-S standard rule: MUST fail
+  the payment." Previously, `Decoder::resolvePayeeKey()` returned the
+  value of any `n` tag without checking it — an attacker could pair any
+  pubkey with an unrelated valid signature. The decoder now:
+  - rejects high-S signatures (`InvalidSignatureException`) when an `n`
+    tag is present;
+  - performs ECDSA recovery and requires the recovered key to equal the
+    `n` tag value (case-insensitive hex), otherwise raises
+    `InvalidSignatureException`.
+
+  Recovery+comparison is functionally equivalent to the spec's "use `n`
+  to validate" when the signature is low-S, so we reuse the existing
+  recovery path.
+
+  When no `n` tag is present, both high-S and low-S signatures continue
+  to be accepted via key recovery, as the spec's "otherwise" branch
+  requires.
+
+### Known follow-ups (not addressed here)
+
+The spec also requires readers to fail the payment when:
+
+- a fixed-length tag (`p`, `h`, `s`, `n`) has the wrong `data_length`
+  (52, 52, 52, 53). The current decoder silently skips such tags.
+- neither `d` nor `h` is present, or both are present.
+
+These are decoder-side gaps unrelated to signature validation and will
+be addressed in a follow-up.
 - **Reject non-hex characters in `Bech32::hexToBytes`.** Previously, `hexdec()`
   silently coerced unknown characters to `0`, producing all-zero byte arrays
   for malformed `payment_hash` / `payment_secret` / `payee` tag data. The

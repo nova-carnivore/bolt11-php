@@ -173,6 +173,9 @@ final class Bech32
         if (strlen($hex) % 2 !== 0) {
             throw new InvalidInvoiceException('Hex string must have even length');
         }
+        if ($hex !== '' && !ctype_xdigit($hex)) {
+            throw new InvalidInvoiceException(sprintf('Invalid hex string: "%s"', $hex));
+        }
 
         $bytes = [];
         for ($i = 0; $i < strlen($hex); $i += 2) {

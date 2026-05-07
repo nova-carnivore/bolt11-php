@@ -82,10 +82,6 @@ final class Signer
 
         // Signature → 5-bit words: 64 bytes → 103 words, then recovery flag as 104th word
         $sigWords = Bech32::eightToFive($signature);
-        // Ensure exactly 103 words
-        while (count($sigWords) < 103) {
-            $sigWords[] = 0;
-        }
         $sigWords[] = $recoveryFlag;
 
         $allWords = [...$dataWords, ...$sigWords];

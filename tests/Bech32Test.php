@@ -79,6 +79,21 @@ final class Bech32Test extends TestCase
         Bech32::hexToBytes('abc');
     }
 
+    public function testHexToBytesRejectsNonHex(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('hex');
+
+        Bech32::hexToBytes('zzzz');
+    }
+
+    public function testHexToBytesRejectsMixedNonHex(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        Bech32::hexToBytes('00gg');
+    }
+
     public function testBytesToInt(): void
     {
         self::assertSame(256, Bech32::bytesToInt([1, 0]));

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nova\Bitcoin\Bolt11;
 
+use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
 use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
 
 /**
@@ -79,9 +80,17 @@ final class Encoder
         $hrp = 'ln' . $network->value;
 
         if ($satoshis !== null) {
+            if ($satoshis === 0) {
+                throw new InvalidAmountException('Amount must not be zero (use null for an any-amount invoice)');
+            }
+
             $hrp .= Helpers::msatToHrpString($satoshis * 1000);
         } elseif ($millisatoshis !== null) {
             $msat = (int) $millisatoshis;
+            if ($msat === 0) {
+                throw new InvalidAmountException('Amount must not be zero (use null for an any-amount invoice)');
+            }
+
             $hrp .= Helpers::msatToHrpString($msat);
         }
 

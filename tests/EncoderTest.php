@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nova\Bitcoin\Bolt11\Tests;
 
 use Nova\Bitcoin\Bolt11\Encoder;
+use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
 use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
 use Nova\Bitcoin\Bolt11\Network;
 use Nova\Bitcoin\Bolt11\Signer;
@@ -173,6 +174,31 @@ final class EncoderTest extends TestCase
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
         self::assertStringStartsWith('lntbs', $signed->paymentRequest);
+    }
+
+    /**
+     * Spec: "MUST NOT include an amount of 0 millisatoshis."
+     * Without the fix, satoshis=0 falls through to msatToHrpString(0) and emits "0p",
+     * producing a malformed prefix "lnbc0p" that no conformant reader will parse.
+     */
+    public function testZeroSatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            satoshis: 0,
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    public function testZeroMillisatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            millisatoshis: '0',
+            tags: $this->makeBasicTags(),
+        );
     }
 
     public function testRegtestInvoice(): void

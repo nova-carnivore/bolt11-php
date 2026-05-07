@@ -67,6 +67,11 @@ final class Decoder
         // Extract signature
         $sigBytes = Bech32::fiveToEightTrim(array_slice($signatureWords, 0, 103));
         $recoveryFlag = $signatureWords[103];
+        if ($recoveryFlag > 3) {
+            throw new InvalidSignatureException(
+                sprintf('Invalid recovery flag: %d (must be 0–3)', $recoveryFlag),
+            );
+        }
         $signature = Bech32::bytesToHex($sigBytes);
 
         // Signing data: hrp UTF-8 || data-words→bytes
@@ -91,7 +96,7 @@ final class Decoder
         $timeExpireDate = $timestamp + $expireTime;
 
         return new Invoice(
-            complete: true,
+            complete: $payeeNodeKey !== null,
             prefix: $hrp,
             wordsTemp: '',
             network: $network,

@@ -249,7 +249,14 @@ final class Decoder
     }
 
     /**
-     * Recover or verify the payee's public key from the signature.
+     * Recover the payee's public key from the signature, and — if an explicit
+     * `n` tag is present — verify it matches the recovered key.
+     *
+     * Per BOLT 11, a reader MUST check that the signature is valid. With or
+     * without an `n` field, that requires successful ECDSA key recovery.
+     * When `n` is provided, it MUST equal the recovered key; trusting the
+     * tag without verification would let a forged invoice present any pubkey
+     * alongside an unrelated signature.
      *
      * @param list<int> $sigHash SHA-256 hash bytes
      * @param list<int> $sigBytes 64-byte compact signature
@@ -258,14 +265,25 @@ final class Decoder
      */
     private static function resolvePayeeKey(array $sigHash, array $sigBytes, int $recoveryFlag, array $tags): ?string
     {
-        // Check for explicit payee tag first
+        $recovered = self::recoverPublicKey($sigHash, $sigBytes, $recoveryFlag);
+
         foreach ($tags as $tag) {
-            if ($tag->tagName === 'payee' && is_string($tag->data)) {
-                return $tag->data;
+            if ($tag->tagName !== 'payee' || !is_string($tag->data)) {
+                continue;
             }
+            if ($recovered === null) {
+                return null;
+            }
+            if (strtolower($tag->data) !== strtolower($recovered)) {
+                throw new InvalidSignatureException(
+                    'payee node key tag does not match the key recovered from the signature',
+                );
+            }
+
+            return $tag->data;
         }
 
-        return self::recoverPublicKey($sigHash, $sigBytes, $recoveryFlag);
+        return $recovered;
     }
 
     /**

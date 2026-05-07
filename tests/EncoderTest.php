@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Nova\Bitcoin\Bolt11\Tests;
 
+use Nova\Bitcoin\Bolt11\Decoder;
 use Nova\Bitcoin\Bolt11\Encoder;
 use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
 use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
+use Nova\Bitcoin\Bolt11\Exception\InvalidSignatureException;
 use Nova\Bitcoin\Bolt11\Invoice;
 use Nova\Bitcoin\Bolt11\Network;
 use Nova\Bitcoin\Bolt11\Signer;
@@ -193,6 +195,63 @@ final class EncoderTest extends TestCase
             millisatoshis: '0',
             tags: $this->makeBasicTags(),
         );
+    }
+
+    /**
+     * Per BOLT 11, when an `n` tag is present, readers MUST still verify the
+     * signature is valid. Trusting the tag without comparing it to the
+     * recovered key would let a forged invoice claim any pubkey alongside an
+     * unrelated signature.
+     */
+    public function testForgedPayeeNodeKeyTagRejected(): void
+    {
+        // Sign with PRIVATE_KEY (whose pubkey is SPEC_PUBKEY) but inject an
+        // `n` tag claiming a different pubkey.
+        $unsigned = Encoder::encode(
+            network: Network::Bitcoin,
+            satoshis: 1000,
+            timestamp: 1700000000,
+            tags: [
+                Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+                Tag::description('forged n tag'),
+                Tag::payeeNodeKey('029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255'),
+            ],
+        );
+
+        $signed = Signer::sign($unsigned, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
+
+        $this->expectException(InvalidSignatureException::class);
+        $this->expectExceptionMessage('payee node key tag does not match');
+
+        Decoder::decode($signed->paymentRequest);
+    }
+
+    /**
+     * The matching case: when an `n` tag is present and equals the recovered
+     * key, decode succeeds and surfaces the tagged value.
+     */
+    public function testMatchingPayeeNodeKeyTagAccepted(): void
+    {
+        $unsigned = Encoder::encode(
+            network: Network::Bitcoin,
+            satoshis: 1000,
+            timestamp: 1700000000,
+            tags: [
+                Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+                Tag::description('matching n tag'),
+                Tag::payeeNodeKey(self::SPEC_PUBKEY),
+            ],
+        );
+
+        $signed = Signer::sign($unsigned, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
+
+        $decoded = Decoder::decode($signed->paymentRequest);
+
+        self::assertSame(self::SPEC_PUBKEY, $decoded->payeeNodeKey);
     }
 
     public function testRegtestInvoice(): void

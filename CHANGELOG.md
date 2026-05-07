@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validate the signer, instead of returning a partially-decoded invoice.
   Previously the decoder hardcoded `complete: true` after every decode,
   silently producing invoices with `payeeNodeKey === null`.
+- **Verify the `n` tag against the recovered key.** Previously
+  `Decoder::resolvePayeeKey()` returned the value of any `n` tag without
+  checking it; an attacker could pair any pubkey with an unrelated valid
+  signature. The decoder now always performs ECDSA recovery, and when an
+  `n` tag is present requires it to equal the recovered key
+  (case-insensitive hex). A mismatch raises `InvalidSignatureException`.
 - **Reject non-hex characters in `Bech32::hexToBytes`.** Previously, `hexdec()`
   silently coerced unknown characters to `0`, producing all-zero byte arrays
   for malformed `payment_hash` / `payment_secret` / `payee` tag data. The

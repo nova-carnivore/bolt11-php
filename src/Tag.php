@@ -93,9 +93,34 @@ final readonly class Tag
 
     /**
      * Create a fallback address tag.
+     *
+     * Per BOLT 11 / BIP-141, the address-hash byte length is fixed by the
+     * version code:
+     *   - 0           : 20 bytes (P2WPKH) or 32 bytes (P2WSH)
+     *   - 1           : 32 bytes (P2TR)
+     *   - 2..16       : 2..40 bytes (segwit witness program, BIP-141)
+     *   - 17          : 20 bytes (P2PKH)
+     *   - 18          : 20 bytes (P2SH)
      */
     public static function fallbackAddress(int $code, string $addressHash): self
     {
+        if (strlen($addressHash) % 2 !== 0 || ($addressHash !== '' && !ctype_xdigit($addressHash))) {
+            throw new InvalidInvoiceException('Fallback address hash must be a valid hex string');
+        }
+        $bytes = intdiv(strlen($addressHash), 2);
+        $valid = match (true) {
+            $code === 17, $code === 18 => $bytes === 20,
+            $code === 0 => $bytes === 20 || $bytes === 32,
+            $code === 1 => $bytes === 32,
+            $code >= 2 && $code <= 16 => $bytes >= 2 && $bytes <= 40,
+            default => false,
+        };
+        if (!$valid) {
+            throw new InvalidInvoiceException(
+                sprintf('Invalid fallback address: version %d with %d-byte hash', $code, $bytes),
+            );
+        }
+
         return new self('fallback_address', new FallbackAddress(
             code: $code,
             addressHash: $addressHash,

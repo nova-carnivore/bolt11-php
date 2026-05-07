@@ -88,6 +88,20 @@ final class Signer
         $prefix = gmp_cmp(gmp_mod($pubPoint->getY(), gmp_init(2)), gmp_init(0)) === 0 ? '02' : '03';
         $pubKeyHex = $prefix . $x;
 
+        // Per BOLT 11, "MUST set `n` to the public key used to create the
+        // signature." If the unsigned invoice already carries an explicit
+        // `n` tag, fail-fast on mismatch — otherwise we'd produce an
+        // invoice that no compliant reader will accept.
+        foreach ($invoice->tags as $tag) {
+            if ($tag->tagName === 'payee' && is_string($tag->data)) {
+                if (strtolower($tag->data) !== strtolower($pubKeyHex)) {
+                    throw new InvalidSignatureException(
+                        'payee node key (n) tag does not match the public key derived from the signing private key',
+                    );
+                }
+            }
+        }
+
         return $invoice->with(
             complete: true,
             prefix: $hrp,

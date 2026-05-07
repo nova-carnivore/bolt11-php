@@ -13,11 +13,12 @@ before 1.0, and adding a second static analyzer.
 
 ### Added
 
-- **`FeatureBits::$optionRouteBlinding`** (bits 24/25) and
+- **`FeatureBits::$optionRouteBlinding`** (bits 24/25),
+  **`FeatureBits::$optionAttributionData`** (bits 36/37), and
   **`FeatureBits::$optionPaymentMetadata`** (bits 48/49) — new readonly
-  properties tracking the current BOLT 9 invoice-context features. The
-  decoder uses these to recognise (and not reject) bit 48 as set in spec
-  test vector 9.
+  properties covering all BOLT 9 invoice-context features. Bit 48 is
+  required to decode spec test vector 9; bits 24/25 and 36/37 are also
+  current invoice-context features per BOLT 9.
 - **`Invoice::verifyDescription(string $description): bool`** — checks an
   out-of-band description against either the literal `d` tag (byte-exact)
   or the `h` (description_hash) commitment (constant-time SHA-256). BOLT 11
@@ -81,12 +82,19 @@ before 1.0, and adding a second static analyzer.
   readers SHOULD treat these fields as invalid if they begin with a
   zero field element. The single-zero `[0]` encoding for the value 0
   remains canonical and is not flagged.
-- **Reject unknown required (even) feature bits.** Per spec, a reader
-  MUST fail the payment if the `9` field contains unknown even bits.
-  `FeatureBits` now also tracks `option_route_blinding` (24/25) and
-  `option_payment_metadata` (48/49) so that current spec test vectors
-  (notably vector 9) decode successfully; any other set bit beyond the
-  known set lands in `extraBits` and triggers decode failure when even.
+- **Reject unknown required (even) feature bits, scoped strictly to the
+  BOLT 9 *invoice* context.** Per spec, a reader MUST fail the payment
+  if the `9` field contains unknown even bits. The known-feature map is
+  now derived from BOLT 9's "Context" column — only bits whose context
+  contains `9` (plus `var_onion_optin` 8/9 and `payment_secret` 14/15,
+  which BOLT 9 marks ASSUMED but BOLT 11 spec test vector 7 sets in
+  invoices). This means channel-only features (e.g.
+  `option_data_loss_protect`, `option_upfront_shutdown_script`,
+  `gossip_queries`, `option_static_remotekey`,
+  `option_support_large_channel`) now correctly fall in `extraBits` and,
+  if even/required, cause decode to fail. Conversely,
+  `option_attribution_data` (36/37) is now tracked because BOLT 9 marks
+  it `IN9`.
 - **Reject non-zero padding bits in fixed-length fields.** Per canonical
   encoding, the trailing padding bits when 5-bit words are unpacked to
   bytes MUST be zero. The decoder now validates: 4 padding bits at the
@@ -105,6 +113,22 @@ before 1.0, and adding a second static analyzer.
   `millisatoshis: 'abc'` / `'-100'` now throw `InvalidAmountException`.
   Previously `(int) $millisatoshis` quietly returned 0 for non-numeric
   strings, allowing malformed input to look valid.
+- **`Signer::sign()` verifies an explicit `n` tag matches the signing
+  key.** Per spec, "MUST set `n` to the public key used to create the
+  `signature`." If the unsigned invoice already carries an `n` tag whose
+  value differs from the public key derived from the supplied private
+  key, sign fails with `InvalidSignatureException`. Without this check,
+  the writer would emit an invoice that no compliant reader will accept.
+- **`Tag::fallbackAddress()` validates the address-hash length per
+  version code at construction time.** P2PKH (17) / P2SH (18) require
+  20-byte hashes; segwit v0 requires 20 or 32 bytes; segwit v1 (P2TR)
+  requires 32 bytes; segwit v2-16 require 2-40 bytes. Versions outside
+  0-18 are rejected. Non-hex input also fails fast.
+- **BOLT 9 transitive feature dependencies are enforced at decode.**
+  Per BOLT 9, "if the feature vector does not set all known, transitive
+  feature dependencies: MUST NOT attempt the payment." The decoder now
+  rejects invoices whose `9` field sets `basic_mpp` without
+  `payment_secret`, or `payment_secret` without `var_onion_optin`.
 - **Reject duplicate singleton tags.** `payment_hash`, `payment_secret`,
   `description`, `purpose_commit_hash`, `payee`, `expire_time`,
   `min_final_cltv_expiry`, `feature_bits`, and `metadata` MUST appear
@@ -145,10 +169,37 @@ before 1.0, and adding a second static analyzer.
   present (was always populated with an empty stub). Code that did
   `count($fb->extraBits['bits']) > 0` should switch to
   `$fb->extraBits !== null`.
-- **`FeatureBits::extraBits['start_bit']`** removed. With the known set
-  no longer contiguous (it now includes bits 24/25 and 48/49 as well as
-  0–19), a single starting bit is no longer meaningful. The remaining
-  shape is `{bits: list<int>, has_required: bool}`.
+- **`FeatureBits::extraBits['start_bit']`** removed. The known set is
+  no longer contiguous; the remaining shape is
+  `{bits: list<int>, has_required: bool}`.
+- **Channel- and init-only properties removed from `FeatureBits`:**
+  `$optionDataLossProtect` (0/1), `$initialRoutingSync` (2/3),
+  `$optionUpfrontShutdownScript` (4/5), `$gossipQueries` (6/7),
+  `$gossipQueriesEx` (10/11), `$optionStaticRemotekey` (12/13), and
+  `$optionSupportLargeChannel` (18/19). Per BOLT 9, none of these have
+  `9` in their Context column — they are not legal in invoice context,
+  and a reader claiming to "know" them was being too permissive.
+  Bits 2/3 (`initial_routing_sync`) is also no longer in BOLT 9 at all.
+  Code that read these properties should either move to channel-context
+  parsers or treat them as decode failures (which the new behaviour
+  does automatically when the bits are required).
+
+### Spec interpretation notes
+
+- **Wrong-length `p`/`h`/`s`/`n` tags are silently skipped, not failed.**
+  The spec prose at `11-payment-encoding.md` line 213 says readers MUST
+  fail the payment if any of these fields has the wrong `data_length`.
+  Spec test vector 12, however, explicitly marks such candidates
+  `(ignored)`. We follow the canonical test vector. The post-parse
+  presence check (`validateRequiredTagPresence`) still fails the decode
+  if every candidate of a required type is wrong-length.
+- **Writer-side `feature_bits` minimum data_length is not enforced
+  against `FeatureBits::wordLength`.** `FeatureBits::toWords()` honours
+  the user-supplied `wordLength`. A hand-constructed `FeatureBits` with
+  an oversized `wordLength` would emit non-minimal output. The natural
+  `fromWords()` → `toWords()` round-trip stays canonical, so this only
+  triggers if the user constructs `FeatureBits` directly with a
+  larger-than-needed length.
 
 ### Other
 

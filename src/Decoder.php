@@ -177,6 +177,8 @@ final class Decoder
     /**
      * Spec: a reader MUST fail the payment if the `9` field contains unknown
      * even feature bits that are non-zero. Unknown odd bits MUST be ignored.
+     * Additionally, BOLT 9 says "if the feature vector does not set all
+     * known, transitive feature dependencies: MUST NOT attempt the payment."
      *
      * "Unknown" is relative to this implementation's known-feature map (see
      * FeatureBits::KNOWN_FEATURES). Bits not in that map land in
@@ -187,16 +189,44 @@ final class Decoder
     private static function validateFeatureBits(array $tags): void
     {
         foreach ($tags as $tag) {
-            if (
-                $tag->tagName === 'feature_bits'
-                && $tag->data instanceof FeatureBits
-                && $tag->data->extraBits !== null
-                && $tag->data->extraBits['has_required']
-            ) {
+            if (!($tag->tagName === 'feature_bits' && $tag->data instanceof FeatureBits)) {
+                continue;
+            }
+            $fb = $tag->data;
+
+            if ($fb->extraBits !== null && $fb->extraBits['has_required']) {
                 throw new InvalidInvoiceException(
                     'Invoice requires unknown feature bits (unknown even bit set in `9` field)',
                 );
             }
+
+            self::validateFeatureBitDependencies($fb);
+        }
+    }
+
+    /**
+     * Enforce the BOLT 9 transitive-dependency chain that's relevant for
+     * invoice context:
+     *   basic_mpp (16/17) → payment_secret (14/15) → var_onion_optin (8/9)
+     *
+     * If a feature is set (required OR supported), all its dependencies must
+     * be set too (in either flavour). The spec phrases this as a payer-side
+     * rule, but the only sensible point to enforce it for an invoice library
+     * is at decode.
+     */
+    private static function validateFeatureBitDependencies(FeatureBits $fb): void
+    {
+        $isSet = static fn (?array $f): bool => $f !== null && ($f['required'] || $f['supported']);
+
+        if ($isSet($fb->paymentSecret) && !$isSet($fb->varOnionOptin)) {
+            throw new InvalidInvoiceException(
+                'BOLT 9 dependency violation: payment_secret requires var_onion_optin',
+            );
+        }
+        if ($isSet($fb->basicMpp) && !$isSet($fb->paymentSecret)) {
+            throw new InvalidInvoiceException(
+                'BOLT 9 dependency violation: basic_mpp requires payment_secret',
+            );
         }
     }
 

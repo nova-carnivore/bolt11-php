@@ -291,6 +291,90 @@ final class DecoderTest extends TestCase
         Decoder::decode($tampered);
     }
 
+    public function testBasicMppWithoutPaymentSecretRejected(): void
+    {
+        // basic_mpp = bit 16. Minimum encoding requires 4 words (20 bits).
+        // bit 16 sits at MSB-position 3 → word 0, bit 1 → word 0 = 1<<1 = 2.
+        $featureWords = [2, 0, 0, 0];
+
+        $invoice = $this->craftFromTagWords([
+            ...self::tagWords(1, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                )),
+            ]),
+            ...self::tagWords(16, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                )),
+            ]),
+            ...self::tagWords(13, Bech32::eightToFive(Bech32::stringToBytes('test'))),
+            ...self::tagWords(5, $featureWords),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('basic_mpp requires payment_secret');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testPaymentSecretFeatureBitWithoutVarOnionOptinRejected(): void
+    {
+        // Set bit 14 (payment_secret feature) without bit 8 (var_onion_optin).
+        // 3 words = 15 bits. Bit 14 sits at MSB-position 0 → word 0, bit 4
+        // → word 0 = 1 << 4 = 16.
+        $featureWords = [16, 0, 0];
+
+        $invoice = $this->craftFromTagWords([
+            ...self::tagWords(1, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                )),
+            ]),
+            ...self::tagWords(16, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                )),
+            ]),
+            ...self::tagWords(13, Bech32::eightToFive(Bech32::stringToBytes('test'))),
+            ...self::tagWords(5, $featureWords),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('payment_secret requires var_onion_optin');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testNonInvoiceContextFeatureBitRejected(): void
+    {
+        // Bit 0 = option_data_loss_protect — channel feature (Context: ASSUMED,
+        // not invoice-context). When set required in an invoice, decode must
+        // reject it as unknown-in-invoice-context.
+        // 1 word = 5 bits. Bit 0 = LSB-most = bit 0 of word 0 = word 0 = 1.
+        $featureWords = [1];
+
+        $invoice = $this->craftFromTagWords([
+            ...self::tagWords(1, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                )),
+            ]),
+            ...self::tagWords(16, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                )),
+            ]),
+            ...self::tagWords(13, Bech32::eightToFive(Bech32::stringToBytes('test'))),
+            ...self::tagWords(5, $featureWords),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('unknown feature');
+
+        Decoder::decode($invoice);
+    }
+
     public function testUnknownRequiredFeatureBitRejected(): void
     {
         // Set bit 22 (option_anchors_zero_fee_htlc_tx — not in our known

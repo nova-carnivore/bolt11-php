@@ -239,6 +239,38 @@ final class EncoderTest extends TestCase
         Tag::minFinalCltvExpiry(-1);
     }
 
+    public function testFallbackAddressWrongLengthForP2pkhRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('Invalid fallback');
+
+        // P2PKH (code 17) requires a 20-byte hash; we pass 19 bytes.
+        Tag::fallbackAddress(17, str_repeat('aa', 19));
+    }
+
+    public function testFallbackAddressWrongLengthForP2trRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        // P2TR (segwit v1) requires a 32-byte hash; we pass 20 bytes.
+        Tag::fallbackAddress(1, str_repeat('aa', 20));
+    }
+
+    public function testFallbackAddressUnknownVersionRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        Tag::fallbackAddress(20, str_repeat('aa', 20));
+    }
+
+    public function testFallbackAddressNonHexRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('hex');
+
+        Tag::fallbackAddress(17, 'zz' . str_repeat('aa', 19));
+    }
+
     public function testZeroMillisatoshisRejected(): void
     {
         $this->expectException(InvalidAmountException::class);
@@ -250,15 +282,14 @@ final class EncoderTest extends TestCase
     }
 
     /**
-     * Per BOLT 11, when an `n` tag is present, readers MUST still verify the
-     * signature is valid. Trusting the tag without comparing it to the
-     * recovered key would let a forged invoice claim any pubkey alongside an
-     * unrelated signature.
+     * Per BOLT 11, "MUST set `n` to the public key used to create the
+     * `signature`." If a writer constructs an unsigned invoice with an `n`
+     * tag claiming a different pubkey than the signing key, the Signer must
+     * fail-fast — otherwise the writer would emit an invoice that no
+     * compliant reader will accept.
      */
-    public function testForgedPayeeNodeKeyTagRejected(): void
+    public function testSignerRejectsMismatchedPayeeNodeKey(): void
     {
-        // Sign with PRIVATE_KEY (whose pubkey is SPEC_PUBKEY) but inject an
-        // `n` tag claiming a different pubkey.
         $unsigned = Encoder::encode(
             network: Network::Bitcoin,
             satoshis: 1000,
@@ -266,18 +297,15 @@ final class EncoderTest extends TestCase
             tags: [
                 Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
                 Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
-                Tag::description('forged n tag'),
+                Tag::description('mismatched n tag'),
                 Tag::payeeNodeKey('029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255'),
             ],
         );
 
-        $signed = Signer::sign($unsigned, self::PRIVATE_KEY);
-        self::assertNotNull($signed->paymentRequest);
-
         $this->expectException(InvalidSignatureException::class);
-        $this->expectExceptionMessage('payee node key tag does not match');
+        $this->expectExceptionMessage('does not match the public key derived from the signing private key');
 
-        Decoder::decode($signed->paymentRequest);
+        Signer::sign($unsigned, self::PRIVATE_KEY);
     }
 
     /**

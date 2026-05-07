@@ -10,8 +10,12 @@ namespace Nova\Bitcoin\Bolt11;
  * Feature bits are encoded in 5-bit words (big-endian). For each pair, the
  * even bit indicates "required", the odd bit indicates "optional/supported".
  *
- * The set of *known* (tracked) feature pairs covers the BOLT 9 features that
- * appear in invoice context. Anything else that is set lands in `extraBits`.
+ * The known set is **deliberately scoped to BOLT 9 invoice-context features
+ * only** (those whose Context column contains `9`). Channel- and init-only
+ * features (`option_data_loss_protect`, `option_upfront_shutdown_script`,
+ * etc.) are NOT tracked here: per BOLT 11, a reader MUST fail the payment
+ * if the `9` field contains unknown even bits, and "unknown" in invoice
+ * context means anything not standardised for invoices.
  */
 final readonly class FeatureBits
 {
@@ -19,51 +23,37 @@ final readonly class FeatureBits
      * Map of even bit index → property name. Each entry covers a feature pair
      * (`even` = required, `even + 1` = optional). A bit is "known" iff its
      * even-numbered partner is a key here.
+     *
+     * Source: BOLT 9, "Context" column containing `9`. Bits 8/9 and 14/15 are
+     * marked "ASSUMED" in BOLT 9 but BOLT 11 spec test vector 7 sets them, so
+     * they are tracked here as valid invoice-context bits.
      */
     private const array KNOWN_FEATURES = [
-        0 => 'optionDataLossProtect',
-        2 => 'initialRoutingSync',
-        4 => 'optionUpfrontShutdownScript',
-        6 => 'gossipQueries',
         8 => 'varOnionOptin',
-        10 => 'gossipQueriesEx',
-        12 => 'optionStaticRemotekey',
         14 => 'paymentSecret',
         16 => 'basicMpp',
-        18 => 'optionSupportLargeChannel',
         24 => 'optionRouteBlinding',
+        36 => 'optionAttributionData',
         48 => 'optionPaymentMetadata',
     ];
 
     /**
      * @param int $wordLength Number of 5-bit words used
-     * @param array{required: bool, supported: bool}|null $optionDataLossProtect Feature bits 0/1
-     * @param array{required: bool, supported: bool}|null $initialRoutingSync Feature bits 2/3
-     * @param array{required: bool, supported: bool}|null $optionUpfrontShutdownScript Feature bits 4/5
-     * @param array{required: bool, supported: bool}|null $gossipQueries Feature bits 6/7
      * @param array{required: bool, supported: bool}|null $varOnionOptin Feature bits 8/9
-     * @param array{required: bool, supported: bool}|null $gossipQueriesEx Feature bits 10/11
-     * @param array{required: bool, supported: bool}|null $optionStaticRemotekey Feature bits 12/13
      * @param array{required: bool, supported: bool}|null $paymentSecret Feature bits 14/15
      * @param array{required: bool, supported: bool}|null $basicMpp Feature bits 16/17
-     * @param array{required: bool, supported: bool}|null $optionSupportLargeChannel Feature bits 18/19
      * @param array{required: bool, supported: bool}|null $optionRouteBlinding Feature bits 24/25
+     * @param array{required: bool, supported: bool}|null $optionAttributionData Feature bits 36/37
      * @param array{required: bool, supported: bool}|null $optionPaymentMetadata Feature bits 48/49
      * @param array{bits: list<int>, has_required: bool}|null $extraBits Bits set outside the known set
      */
     public function __construct(
         public int $wordLength,
-        public ?array $optionDataLossProtect = null,
-        public ?array $initialRoutingSync = null,
-        public ?array $optionUpfrontShutdownScript = null,
-        public ?array $gossipQueries = null,
         public ?array $varOnionOptin = null,
-        public ?array $gossipQueriesEx = null,
-        public ?array $optionStaticRemotekey = null,
         public ?array $paymentSecret = null,
         public ?array $basicMpp = null,
-        public ?array $optionSupportLargeChannel = null,
         public ?array $optionRouteBlinding = null,
+        public ?array $optionAttributionData = null,
         public ?array $optionPaymentMetadata = null,
         public ?array $extraBits = null,
     ) {
@@ -121,17 +111,11 @@ final readonly class FeatureBits
 
         return new self(
             wordLength: count($words),
-            optionDataLossProtect: $feature(0),
-            initialRoutingSync: $feature(2),
-            optionUpfrontShutdownScript: $feature(4),
-            gossipQueries: $feature(6),
             varOnionOptin: $feature(8),
-            gossipQueriesEx: $feature(10),
-            optionStaticRemotekey: $feature(12),
             paymentSecret: $feature(14),
             basicMpp: $feature(16),
-            optionSupportLargeChannel: $feature(18),
             optionRouteBlinding: $feature(24),
+            optionAttributionData: $feature(36),
             optionPaymentMetadata: $feature(48),
             extraBits: $extraBitsArr === [] ? null : [
                 'bits' => $extraBitsArr,
@@ -168,17 +152,11 @@ final readonly class FeatureBits
             }
         };
 
-        $setFeature(0, $this->optionDataLossProtect);
-        $setFeature(2, $this->initialRoutingSync);
-        $setFeature(4, $this->optionUpfrontShutdownScript);
-        $setFeature(6, $this->gossipQueries);
         $setFeature(8, $this->varOnionOptin);
-        $setFeature(10, $this->gossipQueriesEx);
-        $setFeature(12, $this->optionStaticRemotekey);
         $setFeature(14, $this->paymentSecret);
         $setFeature(16, $this->basicMpp);
-        $setFeature(18, $this->optionSupportLargeChannel);
         $setFeature(24, $this->optionRouteBlinding);
+        $setFeature(36, $this->optionAttributionData);
         $setFeature(48, $this->optionPaymentMetadata);
 
         if ($this->extraBits !== null) {

@@ -218,6 +218,111 @@ final class DecoderTest extends TestCase
         Decoder::decode($invoice);
     }
 
+    public function testNonZeroPaddingBitsInPaymentHashRejected(): void
+    {
+        // Take a valid p tag (52 words) and flip a padding bit in the last word.
+        // Lower 4 bits of word 51 are padding and MUST be zero.
+        $hashWords = Bech32::eightToFive(Bech32::hexToBytes(
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        ));
+        $hashWords[51] = $hashWords[51] | 0x01; // set a padding bit
+
+        $invoice = $this->craftFromTagWords([
+            ...self::tagWords(1, array_values($hashWords)),
+            ...self::tagWords(16, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                )),
+            ]),
+            ...self::tagWords(13, Bech32::eightToFive(Bech32::stringToBytes('test'))),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('non-zero padding');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testNonZeroPaddingBitInPayeeNodeKeyRejected(): void
+    {
+        // Construct a 53-word `n` tag whose final word has the lowest bit set.
+        $payeeWords = Bech32::eightToFive(Bech32::hexToBytes(
+            '03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad',
+        ));
+        // 33 bytes -> ceil(264/5) = 53 words; lowest bit of word 52 is padding.
+        $payeeWords[52] = $payeeWords[52] | 0x01;
+
+        $invoice = $this->craftFromTagWords([
+            ...self::tagWords(1, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                )),
+            ]),
+            ...self::tagWords(16, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                )),
+            ]),
+            ...self::tagWords(13, Bech32::eightToFive(Bech32::stringToBytes('test'))),
+            ...self::tagWords(19, array_values($payeeWords)),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('non-zero padding');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testNonZeroPaddingBitsInSignatureRejected(): void
+    {
+        // Vector 1's bech32, but flip padding bits in the signature data word.
+        $original = 'lnbc1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq9qrsgq357wnc5r2ueh7ck6q93dj32dlqnls087fxdwk8qakdyafkq3yap9us6v52vjjsrvywa6rt52cm9r9zqt8r2t7mlcwspyetp5h2tztugp9lfyql';
+        $decoded = Bech32::decode($original);
+        $words = $decoded['data'];
+        // Word 102 is at $words[count - 2] (last 104 are signature: 0..102 sig, 103 flag).
+        $idx = count($words) - 2;
+        \assert($idx >= 0);
+        $words[$idx] = $words[$idx] | 0x01; // flip a padding bit
+        $tampered = Bech32::encode($decoded['hrp'], $words);
+
+        $this->expectException(InvalidSignatureException::class);
+        $this->expectExceptionMessage('padding bits');
+
+        Decoder::decode($tampered);
+    }
+
+    public function testUnknownRequiredFeatureBitRejected(): void
+    {
+        // Set bit 22 (option_anchors_zero_fee_htlc_tx — not in our known
+        // invoice-context map) and required. 22 % 2 == 0 → has_required.
+        // Need enough words to encode bit 22; 5 words = 25 bits.
+        // bit 22 within 25-bit total: index 22 from the LSB.
+        // Per FeatureBits encoding (big-endian within words), bit 22 at index 22
+        // sits in word 0, bit position 4 - ((22 - 0) % 5)... easier to just try
+        // a known-bad encoding: 5 words [1, 0, 0, 0, 0] sets bit 22.
+        $featureWords = [1, 0, 0, 0, 0];
+
+        $invoice = $this->craftFromTagWords([
+            ...self::tagWords(1, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                )),
+            ]),
+            ...self::tagWords(16, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                )),
+            ]),
+            ...self::tagWords(13, Bech32::eightToFive(Bech32::stringToBytes('test'))),
+            ...self::tagWords(5, $featureWords),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('unknown feature');
+
+        Decoder::decode($invoice);
+    }
+
     public function testRouteHintWithLeftoverBytesRejected(): void
     {
         // Construct a route hint whose decoded byte length is 51+5=56 (one full

@@ -7,11 +7,34 @@ namespace Nova\Bitcoin\Bolt11;
 /**
  * Represents feature bits from a BOLT 11 invoice.
  *
- * Feature bits are encoded in 5-bit words (big-endian). Even bits indicate
- * "required", odd bits indicate "optional/supported".
+ * Feature bits are encoded in 5-bit words (big-endian). For each pair, the
+ * even bit indicates "required", the odd bit indicates "optional/supported".
+ *
+ * The set of *known* (tracked) feature pairs covers the BOLT 9 features that
+ * appear in invoice context. Anything else that is set lands in `extraBits`.
  */
 final readonly class FeatureBits
 {
+    /**
+     * Map of even bit index → property name. Each entry covers a feature pair
+     * (`even` = required, `even + 1` = optional). A bit is "known" iff its
+     * even-numbered partner is a key here.
+     */
+    private const array KNOWN_FEATURES = [
+        0 => 'optionDataLossProtect',
+        2 => 'initialRoutingSync',
+        4 => 'optionUpfrontShutdownScript',
+        6 => 'gossipQueries',
+        8 => 'varOnionOptin',
+        10 => 'gossipQueriesEx',
+        12 => 'optionStaticRemotekey',
+        14 => 'paymentSecret',
+        16 => 'basicMpp',
+        18 => 'optionSupportLargeChannel',
+        24 => 'optionRouteBlinding',
+        48 => 'optionPaymentMetadata',
+    ];
+
     /**
      * @param int $wordLength Number of 5-bit words used
      * @param array{required: bool, supported: bool}|null $optionDataLossProtect Feature bits 0/1
@@ -24,7 +47,9 @@ final readonly class FeatureBits
      * @param array{required: bool, supported: bool}|null $paymentSecret Feature bits 14/15
      * @param array{required: bool, supported: bool}|null $basicMpp Feature bits 16/17
      * @param array{required: bool, supported: bool}|null $optionSupportLargeChannel Feature bits 18/19
-     * @param array{start_bit: int, bits: list<int>, has_required: bool}|null $extraBits Extra feature bits beyond the known set
+     * @param array{required: bool, supported: bool}|null $optionRouteBlinding Feature bits 24/25
+     * @param array{required: bool, supported: bool}|null $optionPaymentMetadata Feature bits 48/49
+     * @param array{bits: list<int>, has_required: bool}|null $extraBits Bits set outside the known set
      */
     public function __construct(
         public int $wordLength,
@@ -38,6 +63,8 @@ final readonly class FeatureBits
         public ?array $paymentSecret = null,
         public ?array $basicMpp = null,
         public ?array $optionSupportLargeChannel = null,
+        public ?array $optionRouteBlinding = null,
+        public ?array $optionPaymentMetadata = null,
         public ?array $extraBits = null,
     ) {
     }
@@ -71,18 +98,20 @@ final readonly class FeatureBits
                 return null;
             }
 
-            // "supported" is true when either bit is set
-            $supported = $req ? true : $sup;
-
-            return ['required' => $req, 'supported' => $supported];
+            return ['required' => $req, 'supported' => $req ? true : $sup];
         };
 
-        $knownEnd = 20;
+        // Build the set of bit positions that fall under a tracked feature.
+        $knownPositions = [];
+        foreach (self::KNOWN_FEATURES as $even => $_propertyName) {
+            $knownPositions[$even] = true;
+            $knownPositions[$even + 1] = true;
+        }
+
         $extraBitsArr = [];
         $hasRequired = false;
-
-        for ($i = $knownEnd; $i < count($bits); $i++) {
-            if ($bits[$i]) {
+        for ($i = 0; $i < count($bits); $i++) {
+            if ($bits[$i] && !isset($knownPositions[$i])) {
                 $extraBitsArr[] = $i;
                 if ($i % 2 === 0) {
                     $hasRequired = true;
@@ -102,8 +131,9 @@ final readonly class FeatureBits
             paymentSecret: $feature(14),
             basicMpp: $feature(16),
             optionSupportLargeChannel: $feature(18),
+            optionRouteBlinding: $feature(24),
+            optionPaymentMetadata: $feature(48),
             extraBits: $extraBitsArr === [] ? null : [
-                'start_bit' => $knownEnd,
                 'bits' => $extraBitsArr,
                 'has_required' => $hasRequired,
             ],
@@ -121,7 +151,7 @@ final readonly class FeatureBits
         $bits = array_fill(0, $totalBits, false);
 
         $setBit = static function (int $i) use (&$bits, $totalBits): void {
-            if ($i < $totalBits) {
+            if ($i >= 0 && $i < $totalBits) {
                 $bits[$i] = true;
             }
         };
@@ -148,6 +178,8 @@ final readonly class FeatureBits
         $setFeature(14, $this->paymentSecret);
         $setFeature(16, $this->basicMpp);
         $setFeature(18, $this->optionSupportLargeChannel);
+        $setFeature(24, $this->optionRouteBlinding);
+        $setFeature(48, $this->optionPaymentMetadata);
 
         if ($this->extraBits !== null) {
             foreach ($this->extraBits['bits'] as $b) {
@@ -155,7 +187,6 @@ final readonly class FeatureBits
             }
         }
 
-        // Convert bit array to 5-bit words (big-endian)
         $words = [];
         for ($w = 0; $w < $this->wordLength; $w++) {
             $val = 0;

@@ -13,6 +13,11 @@ before 1.0, and adding a second static analyzer.
 
 ### Added
 
+- **`FeatureBits::$optionRouteBlinding`** (bits 24/25) and
+  **`FeatureBits::$optionPaymentMetadata`** (bits 48/49) — new readonly
+  properties tracking the current BOLT 9 invoice-context features. The
+  decoder uses these to recognise (and not reject) bit 48 as set in spec
+  test vector 9.
 - **`Invoice::verifyDescription(string $description): bool`** — checks an
   out-of-band description against either the literal `d` tag (byte-exact)
   or the `h` (description_hash) commitment (constant-time SHA-256). BOLT 11
@@ -76,6 +81,18 @@ before 1.0, and adding a second static analyzer.
   readers SHOULD treat these fields as invalid if they begin with a
   zero field element. The single-zero `[0]` encoding for the value 0
   remains canonical and is not flagged.
+- **Reject unknown required (even) feature bits.** Per spec, a reader
+  MUST fail the payment if the `9` field contains unknown even bits.
+  `FeatureBits` now also tracks `option_route_blinding` (24/25) and
+  `option_payment_metadata` (48/49) so that current spec test vectors
+  (notably vector 9) decode successfully; any other set bit beyond the
+  known set lands in `extraBits` and triggers decode failure when even.
+- **Reject non-zero padding bits in fixed-length fields.** Per canonical
+  encoding, the trailing padding bits when 5-bit words are unpacked to
+  bytes MUST be zero. The decoder now validates: 4 padding bits at the
+  end of `p`/`h`/`s` (52 words → 32 bytes), 1 padding bit at the end of
+  `n` (53 words → 33 bytes), and 3 padding bits at the end of the
+  signature data (103 words → 64 bytes).
 - **Reject non-hex characters in `Bech32::hexToBytes()`.** Previously
   `hexdec()` silently coerced unknown characters to zero, producing
   all-zero byte arrays for malformed `payment_hash` / `payment_secret`
@@ -128,20 +145,10 @@ before 1.0, and adding a second static analyzer.
   present (was always populated with an empty stub). Code that did
   `count($fb->extraBits['bits']) > 0` should switch to
   `$fb->extraBits !== null`.
-
-### Known limitations (deferred follow-ups)
-
-- **Unknown even feature bits are not rejected at decode time.** BOLT 11
-  says readers MUST fail on unknown even bits in the `9` field. Faithful
-  enforcement requires expanding `FeatureBits` to know all standardised
-  BOLT 9 invoice-context bits (e.g. `option_route_blinding` 24/25,
-  `option_payment_metadata` 48/49). The current `FeatureBits` map covers
-  bits 0–19 only, and the spec's own test vector 9 sets bit 48; until the
-  map is extended, decode is permissive about unrecognised bits.
-- **Padding bits are not checked.** When 5-bit words are converted to
-  bytes for fixed-length fields (`p`/`h`/`s`/`n`) and the signature, any
-  trailing padding bits should be zero per canonical encoding. The
-  decoder currently discards them silently.
+- **`FeatureBits::extraBits['start_bit']`** removed. With the known set
+  no longer contiguous (it now includes bits 24/25 and 48/49 as well as
+  0–19), a single starting bit is no longer meaningful. The remaining
+  shape is `{bits: list<int>, has_required: bool}`.
 
 ### Other
 

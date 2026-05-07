@@ -64,8 +64,16 @@ final class Decoder
         // Parse tags
         $tags = self::parseTags($tagWords);
         self::validateRequiredTagPresence($tags);
+        self::validateFeatureBits($tags);
 
-        // Extract signature
+        // Extract signature. The 103 sig-data words encode 64 bytes (512 bits)
+        // with 3 trailing padding bits in the lowest 3 bits of word 102; per
+        // canonical encoding those MUST be zero.
+        if (($signatureWords[102] & 0x07) !== 0) {
+            throw new InvalidSignatureException(
+                'Signature has non-zero padding bits in word 102',
+            );
+        }
         $sigBytes = Bech32::fiveToEightTrim(array_slice($signatureWords, 0, 103));
         $recoveryFlag = $signatureWords[103];
         if ($recoveryFlag > 3) {
@@ -163,6 +171,32 @@ final class Decoder
             throw new InvalidInvoiceException(
                 'Invoice must not contain both description (d) and description_hash (h) tags',
             );
+        }
+    }
+
+    /**
+     * Spec: a reader MUST fail the payment if the `9` field contains unknown
+     * even feature bits that are non-zero. Unknown odd bits MUST be ignored.
+     *
+     * "Unknown" is relative to this implementation's known-feature map (see
+     * FeatureBits::KNOWN_FEATURES). Bits not in that map land in
+     * `extraBits.bits`; if any of them is even, decode fails here.
+     *
+     * @param list<Tag> $tags
+     */
+    private static function validateFeatureBits(array $tags): void
+    {
+        foreach ($tags as $tag) {
+            if (
+                $tag->tagName === 'feature_bits'
+                && $tag->data instanceof FeatureBits
+                && $tag->data->extraBits !== null
+                && $tag->data->extraBits['has_required']
+            ) {
+                throw new InvalidInvoiceException(
+                    'Invoice requires unknown feature bits (unknown even bit set in `9` field)',
+                );
+            }
         }
     }
 
@@ -286,6 +320,10 @@ final class Decoder
      * silently skipped (not a hard failure). The required-presence check
      * after parseTags catches the case where every candidate is wrong-length.
      *
+     * 52 5-bit words encode 260 bits; the payload is 256 bits (32 bytes), so
+     * the lower 4 bits of the last word are padding and MUST be zero per
+     * canonical encoding.
+     *
      * @param list<int> $words
      */
     private static function parseHashTag(string $name, array $words, int $dataLen): ?Tag
@@ -293,12 +331,19 @@ final class Decoder
         if ($dataLen !== 52) {
             return null;
         }
+        if (($words[51] & 0x0F) !== 0) {
+            throw new InvalidInvoiceException(
+                sprintf('%s tag has non-zero padding bits', $name),
+            );
+        }
 
         return new Tag($name, Bech32::bytesToHex(Bech32::fiveToEightTrim($words)));
     }
 
     /**
      * Same wrong-length-skip rule as parseHashTag, but for the 53-word `n` tag.
+     * 53 5-bit words encode 265 bits; the payload is 264 bits (33 bytes), so
+     * the lowest bit of the last word is padding and MUST be zero.
      *
      * @param list<int> $words
      */
@@ -306,6 +351,9 @@ final class Decoder
     {
         if ($dataLen !== 53) {
             return null;
+        }
+        if (($words[52] & 0x01) !== 0) {
+            throw new InvalidInvoiceException('payee node key tag has non-zero padding bit');
         }
 
         return new Tag('payee', Bech32::bytesToHex(Bech32::fiveToEightTrim($words)));

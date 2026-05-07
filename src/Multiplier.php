@@ -18,17 +18,19 @@ enum Multiplier: string
     case Pico = 'p';  // 0.000000000001 BTC
 
     /**
-     * Millisatoshis per unit for this multiplier.
+     * Convert an integer count of this multiplier's units to millisatoshis,
+     * using integer arithmetic only (no float precision loss).
+     *
+     * Pico amounts must be multiples of 10 — the caller is responsible for
+     * validating that before calling.
      */
-    public function msatPerUnit(): float
+    public function toMsat(int $units): int
     {
-        $msatPerBtc = 100_000_000_000; // 1e11
-
         return match ($this) {
-            self::Milli => $msatPerBtc / 1_000,       // 1e8
-            self::Micro => $msatPerBtc / 1_000_000,   // 1e5
-            self::Nano => $msatPerBtc / 1_000_000_000, // 100
-            self::Pico => $msatPerBtc / 1e12,          // 0.1
+            self::Milli => $units * 100_000_000,
+            self::Micro => $units * 100_000,
+            self::Nano => $units * 100,
+            self::Pico => intdiv($units, 10),
         };
     }
 

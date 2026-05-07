@@ -52,19 +52,6 @@ final class EncoderTest extends TestCase
         self::assertSame('1 cup coffee', $pr->getDescription());
     }
 
-    public function testUnsignedInvoiceHasWordsTemp(): void
-    {
-        $pr = Encoder::encode(
-            network: Network::Bitcoin,
-            satoshis: 1000,
-            timestamp: 1496314658,
-            tags: $this->makeBasicTags(),
-        );
-
-        self::assertNotEmpty($pr->wordsTemp);
-        self::assertStringStartsWith('lnbc', $pr->wordsTemp);
-    }
-
     public function testHrpGenerationForVariousAmounts(): void
     {
         $makeEncode = fn (?int $sat = null, ?string $msat = null) => Encoder::encode(

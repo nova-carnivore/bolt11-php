@@ -42,11 +42,7 @@ final class Signer
         $dataBytes = Bech32::fiveToEight($dataWords, true);
         $signingData = [...$hrpBytes, ...$dataBytes];
 
-        $binary = '';
-        foreach ($signingData as $b) {
-            $binary .= chr($b & 0xFF);
-        }
-        $sigHash = hash('sha256', $binary, true);
+        $sigHash = hash('sha256', pack('C*', ...$signingData), true);
 
         // Create private key
         $privateKeyGmp = gmp_init($privateKeyHex, 16);

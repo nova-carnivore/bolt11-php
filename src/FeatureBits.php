@@ -102,7 +102,7 @@ final readonly class FeatureBits
             paymentSecret: $feature(14),
             basicMpp: $feature(16),
             optionSupportLargeChannel: $feature(18),
-            extraBits: [
+            extraBits: $extraBitsArr === [] ? null : [
                 'start_bit' => $knownEnd,
                 'bits' => $extraBitsArr,
                 'has_required' => $hasRequired,

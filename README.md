@@ -18,7 +18,7 @@ Modern PHP 8.3+ BOLT 11 Lightning Network invoice encoder/decoder. Full spec com
 - 🏷️ **All tag types** — payment_hash, description, route hints, feature bits, metadata, and more
 - 🔄 **Round-trip safe** — Encode → sign → decode preserves all data
 - 📏 **PSR-12 code style** — Enforced with PHP-CS-Fixer
-- 🔒 **Security-hardened crypto** — Uses paragonie/ecc with constant-time operations
+- 🔒 **Audited crypto dependency** — Uses paragonie/ecc for ECDSA operations
 
 ## Installation
 

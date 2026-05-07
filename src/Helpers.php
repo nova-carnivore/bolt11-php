@@ -103,23 +103,18 @@ final class Helpers
 
         $lastChar = $amountStr[strlen($amountStr) - 1];
         $multiplier = Multiplier::fromSuffix($lastChar);
-
-        if ($multiplier !== null) {
-            $numStr = substr($amountStr, 0, -1);
-            $msatPerUnit = $multiplier->msatPerUnit();
-        } else {
-            $numStr = $amountStr;
-            $msatPerUnit = (float) self::MSAT_PER_BTC;
-        }
+        $numStr = $multiplier !== null ? substr($amountStr, 0, -1) : $amountStr;
 
         if ($numStr === '' || !preg_match('/^\d+$/', $numStr) || (strlen($numStr) > 1 && $numStr[0] === '0')) {
             throw new InvalidAmountException(sprintf('Invalid amount: "%s"', $amountStr));
         }
 
-        if ($multiplier === Multiplier::Pico && ((int) $numStr) % 10 !== 0) {
+        $num = (int) $numStr;
+
+        if ($multiplier === Multiplier::Pico && $num % 10 !== 0) {
             throw new InvalidAmountException('pico-bitcoin amount must be a multiple of 10');
         }
 
-        return (int) round((int) $numStr * $msatPerUnit);
+        return $multiplier?->toMsat($num) ?? $num * self::MSAT_PER_BTC;
     }
 }

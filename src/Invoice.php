@@ -12,7 +12,6 @@ final readonly class Invoice
     /**
      * @param bool $complete Whether the invoice is fully signed
      * @param string $prefix The full HRP prefix (e.g. 'lnbc2500u')
-     * @param string $wordsTemp Temporary bech32 string (unsigned)
      * @param Network|null $network The Bitcoin network
      * @param int|null $satoshis Amount in satoshis (null if sub-sat or no amount)
      * @param string|null $millisatoshis Amount in millisatoshis as string
@@ -29,7 +28,6 @@ final readonly class Invoice
     public function __construct(
         public bool $complete,
         public string $prefix,
-        public string $wordsTemp,
         public ?Network $network,
         public ?int $satoshis,
         public ?string $millisatoshis,
@@ -212,7 +210,6 @@ final readonly class Invoice
         return new self(
             complete: $complete ?? $this->complete,
             prefix: $prefix ?? $this->prefix,
-            wordsTemp: $this->wordsTemp,
             network: $this->network,
             satoshis: $this->satoshis,
             millisatoshis: $this->millisatoshis,

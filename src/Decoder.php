@@ -98,7 +98,6 @@ final class Decoder
         return new Invoice(
             complete: $payeeNodeKey !== null,
             prefix: $hrp,
-            wordsTemp: '',
             network: $network,
             satoshis: $amount?->satoshis(),
             millisatoshis: $amount?->millisatoshis,
@@ -168,7 +167,7 @@ final class Decoder
             'metadata' => new Tag('metadata', Bech32::bytesToHex(Bech32::fiveToEightTrim($words))),
             'expire_time' => new Tag('expire_time', Bech32::wordsToInt($words)),
             'min_final_cltv_expiry' => new Tag('min_final_cltv_expiry', Bech32::wordsToInt($words)),
-            'fallback_address' => new Tag('fallback_address', self::parseFallbackAddress($words)),
+            'fallback_address' => self::parseFallbackTag($words),
             'route_hint' => new Tag('route_hint', self::parseRouteHint($words)),
             'feature_bits' => new Tag('feature_bits', FeatureBits::fromWords($words)),
             default => null,
@@ -202,20 +201,25 @@ final class Decoder
     /**
      * @param list<int> $words
      */
-    private static function parseFallbackAddress(array $words): FallbackAddress
+    private static function parseFallbackTag(array $words): ?Tag
     {
         if ($words === []) {
-            throw new InvalidInvoiceException('Empty fallback address');
+            return null;
         }
 
         $version = $words[0];
+        // Per spec, valid version codes are 0–16 (segwit) plus 17 (P2PKH) and 18 (P2SH).
+        // Readers MUST skip `f` fields with any other version.
+        if ($version > 18) {
+            return null;
+        }
+
         $addrBytes = Bech32::fiveToEightTrim(array_slice($words, 1));
 
-        return new FallbackAddress(
+        return new Tag('fallback_address', new FallbackAddress(
             code: $version,
-            address: '',
             addressHash: Bech32::bytesToHex($addrBytes),
-        );
+        ));
     }
 
     /**
@@ -325,17 +329,8 @@ final class Decoder
      */
     private static function sha256Bytes(array $bytes): array
     {
-        $binary = '';
-        foreach ($bytes as $b) {
-            $binary .= chr($b & 0xFF);
-        }
+        $hash = hash('sha256', pack('C*', ...$bytes), true);
 
-        $hash = hash('sha256', $binary, true);
-        $result = [];
-        for ($i = 0; $i < strlen($hash); $i++) {
-            $result[] = ord($hash[$i]);
-        }
-
-        return $result;
+        return array_map(ord(...), str_split($hash));
     }
 }

@@ -82,7 +82,6 @@ final readonly class Tag
     {
         return new self('fallback_address', new FallbackAddress(
             code: $code,
-            address: '',
             addressHash: $addressHash,
         ));
     }

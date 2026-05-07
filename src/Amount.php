@@ -45,30 +45,21 @@ final readonly class Amount
             throw new InvalidAmountException('Empty amount string');
         }
 
-        $msatPerBtc = 100_000_000_000; // 1e11
-
         $lastChar = $amountStr[strlen($amountStr) - 1];
         $multiplier = Multiplier::fromSuffix($lastChar);
-
-        if ($multiplier !== null) {
-            $numStr = substr($amountStr, 0, -1);
-            $msatPerUnit = $multiplier->msatPerUnit();
-        } else {
-            $numStr = $amountStr;
-            $msatPerUnit = (float) $msatPerBtc;
-        }
+        $numStr = $multiplier !== null ? substr($amountStr, 0, -1) : $amountStr;
 
         if ($numStr === '' || !preg_match('/^\d+$/', $numStr) || (strlen($numStr) > 1 && $numStr[0] === '0')) {
             throw new InvalidAmountException(sprintf('Invalid amount: "%s"', $amountStr));
         }
 
-        // Pico amounts must be multiples of 10
-        if ($multiplier === Multiplier::Pico && ((int) $numStr) % 10 !== 0) {
+        $num = (int) $numStr;
+
+        if ($multiplier === Multiplier::Pico && $num % 10 !== 0) {
             throw new InvalidAmountException('pico-bitcoin amount must be a multiple of 10');
         }
 
-        $num = (int) $numStr;
-        $msat = (int) round($num * $msatPerUnit);
+        $msat = $multiplier?->toMsat($num) ?? $num * 100_000_000_000;
 
         return new self((string) $msat);
     }

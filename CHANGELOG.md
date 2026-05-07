@@ -14,10 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signature is greater than 3. Previously, values 4–31 silently aliased onto
   valid flags (`flag mod 4`), which broke decode→encode round-trip safety
   and accepted spec-non-compliant invoices.
-- **`Invoice::complete` now reflects signature recovery.** Previously hardcoded
-  to `true` after every successful decode. An invoice with a malformed
-  signature and no `n` tag (where ECDSA recovery returns `null`) now reports
-  `complete === false`.
+- **Reject invoices whose signature cannot be recovered.** Per BOLT 11,
+  readers MUST check that the signature is valid — when there is no `n` tag,
+  public-key recovery MUST succeed. `Decoder::decode()` now throws
+  `InvalidSignatureException` if `resolvePayeeKey()` cannot recover or
+  validate the signer, instead of returning a partially-decoded invoice.
+  Previously the decoder hardcoded `complete: true` after every decode,
+  silently producing invoices with `payeeNodeKey === null`.
 - **Reject non-hex characters in `Bech32::hexToBytes`.** Previously, `hexdec()`
   silently coerced unknown characters to `0`, producing all-zero byte arrays
   for malformed `payment_hash` / `payment_secret` / `payee` tag data. The

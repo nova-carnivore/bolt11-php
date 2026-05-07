@@ -81,8 +81,14 @@ final class Decoder
         $signingData = [...$hrpBytes, ...$dataBytes];
         $sigHash = self::sha256Bytes($signingData);
 
-        // Recover / verify payee node key
+        // Recover / verify payee node key. Per BOLT 11, readers MUST check the
+        // signature is valid: when there is no `n` tag, public-key recovery
+        // MUST succeed. A malformed/tampered signature must fail decode, not
+        // produce a partially-decoded invoice.
         $payeeNodeKey = self::resolvePayeeKey($sigHash, $sigBytes, $recoveryFlag, $tags);
+        if ($payeeNodeKey === null) {
+            throw new InvalidSignatureException('Could not recover payee public key from signature');
+        }
 
         // Build expiry
         $expiryTag = null;
@@ -96,7 +102,7 @@ final class Decoder
         $timeExpireDate = $timestamp + $expireTime;
 
         return new Invoice(
-            complete: $payeeNodeKey !== null,
+            complete: true,
             prefix: $hrp,
             network: $network,
             satoshis: $amount?->satoshis(),

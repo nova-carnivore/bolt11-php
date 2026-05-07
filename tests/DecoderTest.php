@@ -87,10 +87,11 @@ final class DecoderTest extends TestCase
     }
 
     /**
-     * `complete` was hardcoded to true even when payeeNodeKey could not be recovered.
-     * After fix, complete must reflect whether payeeNodeKey is known.
+     * Per BOLT 11, readers MUST check the signature is valid: when no `n` tag
+     * is provided, public-key recovery MUST succeed. A signature that cannot
+     * be recovered must cause decode to fail, not return a partial invoice.
      */
-    public function testCompleteFalseWhenSignatureRecoveryFails(): void
+    public function testFailedSignatureRecoveryThrows(): void
     {
         // Zero out all 103 signature words (keep the recovery flag).
         // r=0 makes ECDSA recovery fail (inverseMod(0, n) is undefined).
@@ -103,9 +104,9 @@ final class DecoderTest extends TestCase
         }
         $tampered = Bech32::encode($decoded['hrp'], array_values($words));
 
-        $invoice = Decoder::decode($tampered);
+        $this->expectException(InvalidSignatureException::class);
+        $this->expectExceptionMessage('recover');
 
-        self::assertNull($invoice->payeeNodeKey);
-        self::assertFalse($invoice->complete);
+        Decoder::decode($tampered);
     }
 }

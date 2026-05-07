@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nova\Bitcoin\Bolt11;
 
+use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
 use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
 
 /**
@@ -26,16 +27,11 @@ final class Encoder
         array $tags = [],
         ?int $timestamp = null,
     ): Invoice {
+        self::validateAmounts($satoshis, $millisatoshis);
         self::validateTags($tags);
 
         $timestamp ??= time();
         $hrp = self::buildHRP($network, $satoshis, $millisatoshis);
-        $timestampWords = Bech32::intToWords($timestamp, 7);
-        $tagWords = self::encodeAllTags($tags);
-        $dataWords = [...$timestampWords, ...$tagWords];
-
-        // Generate wordsTemp — the bech32-encoded string without signature
-        $wordsTemp = Bech32::encode($hrp, $dataWords);
 
         $expiryTag = null;
         foreach ($tags as $tag) {
@@ -56,7 +52,6 @@ final class Encoder
         return new Invoice(
             complete: false,
             prefix: $hrp,
-            wordsTemp: $wordsTemp,
             network: $network,
             satoshis: $sat,
             millisatoshis: $msat,
@@ -79,9 +74,17 @@ final class Encoder
         $hrp = 'ln' . $network->value;
 
         if ($satoshis !== null) {
+            if ($satoshis === 0) {
+                throw new InvalidAmountException('Amount must not be zero (use null for an any-amount invoice)');
+            }
+
             $hrp .= Helpers::msatToHrpString($satoshis * 1000);
         } elseif ($millisatoshis !== null) {
             $msat = (int) $millisatoshis;
+            if ($msat === 0) {
+                throw new InvalidAmountException('Amount must not be zero (use null for an any-amount invoice)');
+            }
+
             $hrp .= Helpers::msatToHrpString($msat);
         }
 
@@ -201,7 +204,6 @@ final class Encoder
         }
 
         $hopBytes = [];
-        /** @var RouteHint $hop */
         foreach ($tag->data as $hop) {
             foreach ($hop->toBytes() as $b) {
                 $hopBytes[] = $b;
@@ -224,34 +226,71 @@ final class Encoder
     }
 
     /**
-     * Validate that required tags are present.
+     * Reject negative satoshis and non-numeric / negative millisatoshis at
+     * the writer boundary. `(int) "abc"` quietly returns 0, which would
+     * otherwise make malformed strings look like valid amounts.
+     */
+    private static function validateAmounts(?int $satoshis, ?string $millisatoshis): void
+    {
+        if ($satoshis !== null && $satoshis < 0) {
+            throw new InvalidAmountException('satoshis must not be negative');
+        }
+        if ($millisatoshis !== null && !preg_match('/^\d+$/', $millisatoshis)) {
+            throw new InvalidAmountException(
+                sprintf('millisatoshis must be a non-negative integer string, got "%s"', $millisatoshis),
+            );
+        }
+    }
+
+    /**
+     * Validate that required tags are present, no singleton tag is duplicated,
+     * and description/description_hash are not both set.
+     *
+     * Per BOLT 11 spec, these tags MUST appear at most once. Tags allowing
+     * multiple instances (route_hint, fallback_address) are excluded.
      *
      * @param list<Tag> $tags
      * @throws InvalidInvoiceException
      */
     private static function validateTags(array $tags): void
     {
-        $hasPaymentHash = false;
-        $hasPaymentSecret = false;
-        $hasDescription = false;
+        $singletons = [
+            'payment_hash' => 0,
+            'payment_secret' => 0,
+            'description' => 0,
+            'purpose_commit_hash' => 0,
+            'payee' => 0,
+            'expire_time' => 0,
+            'min_final_cltv_expiry' => 0,
+            'feature_bits' => 0,
+            'metadata' => 0,
+        ];
 
         foreach ($tags as $tag) {
-            match ($tag->tagName) {
-                'payment_hash' => $hasPaymentHash = true,
-                'payment_secret' => $hasPaymentSecret = true,
-                'description', 'purpose_commit_hash' => $hasDescription = true,
-                default => null,
-            };
+            if (isset($singletons[$tag->tagName])) {
+                $singletons[$tag->tagName]++;
+            }
         }
 
-        if (!$hasPaymentHash) {
+        foreach ($singletons as $name => $count) {
+            if ($count > 1) {
+                throw new InvalidInvoiceException(
+                    sprintf('Tag "%s" must appear at most once (got %d)', $name, $count),
+                );
+            }
+        }
+
+        if ($singletons['payment_hash'] === 0) {
             throw new InvalidInvoiceException('payment_hash tag is required');
         }
-        if (!$hasPaymentSecret) {
+        if ($singletons['payment_secret'] === 0) {
             throw new InvalidInvoiceException('payment_secret tag is required');
         }
-        if (!$hasDescription) {
+        if ($singletons['description'] === 0 && $singletons['purpose_commit_hash'] === 0) {
             throw new InvalidInvoiceException('description or purpose_commit_hash tag is required');
+        }
+        if ($singletons['description'] > 0 && $singletons['purpose_commit_hash'] > 0) {
+            throw new InvalidInvoiceException('description and purpose_commit_hash are mutually exclusive');
         }
     }
 }

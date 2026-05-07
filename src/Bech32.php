@@ -29,6 +29,12 @@ final class Bech32
      */
     public static function decode(string $str): array
     {
+        // Per BIP-173, mixed-case strings are invalid. Accept all-lowercase
+        // or all-uppercase, reject anything in between.
+        if ($str !== strtolower($str) && $str !== strtoupper($str)) {
+            throw new InvalidInvoiceException('Mixed-case bech32 string is invalid (BIP-173)');
+        }
+
         $input = strtolower($str);
         $sepIndex = strrpos($input, '1');
 
@@ -172,6 +178,9 @@ final class Bech32
     {
         if (strlen($hex) % 2 !== 0) {
             throw new InvalidInvoiceException('Hex string must have even length');
+        }
+        if ($hex !== '' && !ctype_xdigit($hex)) {
+            throw new InvalidInvoiceException(sprintf('Invalid hex string: "%s"', $hex));
         }
 
         $bytes = [];

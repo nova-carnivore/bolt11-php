@@ -35,6 +35,7 @@ final class RoundTripTest extends TestCase
         );
 
         $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
         self::assertSame(100000, $decoded->satoshis);
@@ -65,6 +66,7 @@ final class RoundTripTest extends TestCase
         );
 
         $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
         self::assertNull($decoded->satoshis);
@@ -86,6 +88,7 @@ final class RoundTripTest extends TestCase
         );
 
         $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
         self::assertSame('967878534', $decoded->millisatoshis);
@@ -115,6 +118,7 @@ final class RoundTripTest extends TestCase
         );
 
         $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
         $routes = $decoded->getRouteHints();
@@ -145,14 +149,13 @@ final class RoundTripTest extends TestCase
         );
 
         $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
-        self::assertNotNull($decoded->getFallbackAddress());
-        self::assertSame(17, $decoded->getFallbackAddress()->code);
-        self::assertSame(
-            '3172b5654f6683c8fb146959d347ce303cae4ca7',
-            $decoded->getFallbackAddress()->addressHash,
-        );
+        $fallback = $decoded->getFallbackAddress();
+        self::assertNotNull($fallback);
+        self::assertSame(17, $fallback->code);
+        self::assertSame('3172b5654f6683c8fb146959d347ce303cae4ca7', $fallback->addressHash);
     }
 
     public function testRoundTripWithDescriptionHash(): void
@@ -169,6 +172,7 @@ final class RoundTripTest extends TestCase
         );
 
         $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
         self::assertSame(
@@ -176,6 +180,49 @@ final class RoundTripTest extends TestCase
             $decoded->getDescriptionHash(),
         );
         self::assertNull($decoded->getDescription());
+    }
+
+    public function testVerifyDescriptionWithLiteralDTag(): void
+    {
+        $original = Encoder::encode(
+            network: Network::Bitcoin,
+            satoshis: 1000,
+            timestamp: 1700000000,
+            tags: [
+                Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+                Tag::description('Order #42'),
+            ],
+        );
+        $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
+        $decoded = Decoder::decode($signed->paymentRequest);
+
+        self::assertTrue($decoded->verifyDescription('Order #42'));
+        self::assertFalse($decoded->verifyDescription('Order #43'));
+    }
+
+    public function testVerifyDescriptionWithHashTag(): void
+    {
+        $description = 'A long product description that is committed to via h tag';
+        $hash = hash('sha256', $description);
+
+        $original = Encoder::encode(
+            network: Network::Bitcoin,
+            satoshis: 1000,
+            timestamp: 1700000000,
+            tags: [
+                Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+                Tag::descriptionHash($hash),
+            ],
+        );
+        $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
+        $decoded = Decoder::decode($signed->paymentRequest);
+
+        self::assertTrue($decoded->verifyDescription($description));
+        self::assertFalse($decoded->verifyDescription('different description'));
     }
 
     public function testRoundTripWithCltvExpiry(): void
@@ -193,6 +240,7 @@ final class RoundTripTest extends TestCase
         );
 
         $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
         self::assertSame(144, $decoded->getTag('min_final_cltv_expiry')?->data);
@@ -212,6 +260,7 @@ final class RoundTripTest extends TestCase
         );
 
         $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
         self::assertSame('ナンセンス 1杯 ☕', $decoded->getDescription());
@@ -233,6 +282,7 @@ final class RoundTripTest extends TestCase
             );
 
             $signed = Signer::sign($original, self::PRIVATE_KEY);
+            self::assertNotNull($signed->paymentRequest);
             self::assertStringStartsWith(
                 'ln' . $network->value,
                 $signed->paymentRequest,

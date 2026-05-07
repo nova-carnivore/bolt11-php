@@ -6,7 +6,6 @@ namespace Nova\Bitcoin\Bolt11;
 
 use GMP;
 use Mdanter\Ecc\Crypto\Key\PrivateKeyInterface;
-use Mdanter\Ecc\Crypto\Signature\Signature;
 use Mdanter\Ecc\Crypto\Signature\Signer as EccSigner;
 use Mdanter\Ecc\EccFactory;
 use Mdanter\Ecc\Primitives\GeneratorPoint;
@@ -42,11 +41,7 @@ final class Signer
         $dataBytes = Bech32::fiveToEight($dataWords, true);
         $signingData = [...$hrpBytes, ...$dataBytes];
 
-        $binary = '';
-        foreach ($signingData as $b) {
-            $binary .= chr($b & 0xFF);
-        }
-        $sigHash = hash('sha256', $binary, true);
+        $sigHash = hash('sha256', pack('C*', ...$signingData), true);
 
         // Create private key
         $privateKeyGmp = gmp_init($privateKeyHex, 16);
@@ -70,7 +65,6 @@ final class Signer
         $r = $sig->getR();
         if (gmp_cmp($s, $halfN) > 0) {
             $s = gmp_sub($n, $s);
-            $sig = new Signature($r, $s);
         }
 
         $rHex = str_pad(gmp_strval($r, 16), 64, '0', STR_PAD_LEFT);
@@ -82,10 +76,6 @@ final class Signer
 
         // Signature → 5-bit words: 64 bytes → 103 words, then recovery flag as 104th word
         $sigWords = Bech32::eightToFive($signature);
-        // Ensure exactly 103 words
-        while (count($sigWords) < 103) {
-            $sigWords[] = 0;
-        }
         $sigWords[] = $recoveryFlag;
 
         $allWords = [...$dataWords, ...$sigWords];
@@ -97,6 +87,20 @@ final class Signer
         $x = str_pad($x, 64, '0', STR_PAD_LEFT);
         $prefix = gmp_cmp(gmp_mod($pubPoint->getY(), gmp_init(2)), gmp_init(0)) === 0 ? '02' : '03';
         $pubKeyHex = $prefix . $x;
+
+        // Per BOLT 11, "MUST set `n` to the public key used to create the
+        // signature." If the unsigned invoice already carries an explicit
+        // `n` tag, fail-fast on mismatch — otherwise we'd produce an
+        // invoice that no compliant reader will accept.
+        foreach ($invoice->tags as $tag) {
+            if ($tag->tagName === 'payee' && is_string($tag->data)) {
+                if (strtolower($tag->data) !== strtolower($pubKeyHex)) {
+                    throw new InvalidSignatureException(
+                        'payee node key (n) tag does not match the public key derived from the signing private key',
+                    );
+                }
+            }
+        }
 
         return $invoice->with(
             complete: true,

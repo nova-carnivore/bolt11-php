@@ -30,6 +30,14 @@ final class Bech32Test extends TestCase
     {
         $this->expectException(InvalidChecksumException::class);
 
+        Bech32::decode('test1qqqqqxxxxxx');
+    }
+
+    public function testDecodeMixedCaseRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('Mixed-case');
+
         Bech32::decode('test1qqqqqXXXXXX');
     }
 
@@ -77,6 +85,21 @@ final class Bech32Test extends TestCase
         $this->expectExceptionMessage('even length');
 
         Bech32::hexToBytes('abc');
+    }
+
+    public function testHexToBytesRejectsNonHex(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('hex');
+
+        Bech32::hexToBytes('zzzz');
+    }
+
+    public function testHexToBytesRejectsMixedNonHex(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        Bech32::hexToBytes('00gg');
     }
 
     public function testBytesToInt(): void

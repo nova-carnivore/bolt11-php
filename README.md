@@ -4,6 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/nova-carnivore/bolt11-php/actions/workflows/ci.yml/badge.svg)](https://github.com/nova-carnivore/bolt11-php/actions/workflows/ci.yml)
 [![PHPStan Level](https://img.shields.io/badge/phpstan-level%209-brightgreen.svg)](https://phpstan.org)
+[![Psalm Level](https://img.shields.io/badge/psalm-level%201-brightgreen.svg)](https://psalm.dev)
 [![Latest Version](https://img.shields.io/packagist/v/nova-carnivore/bolt11-php.svg)](https://packagist.org/packages/nova-carnivore/bolt11-php)
 
 Modern PHP 8.3+ BOLT 11 Lightning Network invoice encoder/decoder. Full spec compliance, production-ready.
@@ -13,12 +14,12 @@ Modern PHP 8.3+ BOLT 11 Lightning Network invoice encoder/decoder. Full spec com
 - ⚡ **Full BOLT 11 spec compliance** — All 12 spec test vectors pass
 - 🔐 **Encode, sign & decode** — Complete lifecycle support
 - 🏗️ **Modern PHP 8.3+** — Enums, readonly classes, named arguments, match expressions
-- 🔍 **PHPStan level 9** — Maximum static analysis strictness
+- 🔍 **PHPStan level 9 + Psalm errorLevel 1** — Maximum static analysis strictness from two analyzers
 - 🌐 **All networks** — Bitcoin, Testnet, Signet, Regtest
 - 🏷️ **All tag types** — payment_hash, description, route hints, feature bits, metadata, and more
 - 🔄 **Round-trip safe** — Encode → sign → decode preserves all data
 - 📏 **PSR-12 code style** — Enforced with PHP-CS-Fixer
-- 🔒 **Security-hardened crypto** — Uses paragonie/ecc with constant-time operations
+- 🔒 **Audited crypto dependency** — Uses paragonie/ecc for ECDSA operations
 
 ## Installation
 
@@ -244,6 +245,7 @@ vendor/bin/phpunit
 
 # Static analysis
 vendor/bin/phpstan analyse
+vendor/bin/psalm
 
 # Code style check
 vendor/bin/php-cs-fixer fix --dry-run --diff

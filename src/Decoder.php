@@ -63,10 +63,24 @@ final class Decoder
 
         // Parse tags
         $tags = self::parseTags($tagWords);
+        self::validateRequiredTagPresence($tags);
+        self::validateFeatureBits($tags);
 
-        // Extract signature
+        // Extract signature. The 103 sig-data words encode 64 bytes (512 bits)
+        // with 3 trailing padding bits in the lowest 3 bits of word 102; per
+        // canonical encoding those MUST be zero.
+        if (($signatureWords[102] & 0x07) !== 0) {
+            throw new InvalidSignatureException(
+                'Signature has non-zero padding bits in word 102',
+            );
+        }
         $sigBytes = Bech32::fiveToEightTrim(array_slice($signatureWords, 0, 103));
         $recoveryFlag = $signatureWords[103];
+        if ($recoveryFlag > 3) {
+            throw new InvalidSignatureException(
+                sprintf('Invalid recovery flag: %d (must be 0–3)', $recoveryFlag),
+            );
+        }
         $signature = Bech32::bytesToHex($sigBytes);
 
         // Signing data: hrp UTF-8 || data-words→bytes
@@ -76,8 +90,14 @@ final class Decoder
         $signingData = [...$hrpBytes, ...$dataBytes];
         $sigHash = self::sha256Bytes($signingData);
 
-        // Recover / verify payee node key
+        // Recover / verify payee node key. Per BOLT 11, readers MUST check the
+        // signature is valid: when there is no `n` tag, public-key recovery
+        // MUST succeed. A malformed/tampered signature must fail decode, not
+        // produce a partially-decoded invoice.
         $payeeNodeKey = self::resolvePayeeKey($sigHash, $sigBytes, $recoveryFlag, $tags);
+        if ($payeeNodeKey === null) {
+            throw new InvalidSignatureException('Could not recover payee public key from signature');
+        }
 
         // Build expiry
         $expiryTag = null;
@@ -93,7 +113,6 @@ final class Decoder
         return new Invoice(
             complete: true,
             prefix: $hrp,
-            wordsTemp: '',
             network: $network,
             satoshis: $amount?->satoshis(),
             millisatoshis: $amount?->millisatoshis,
@@ -110,6 +129,126 @@ final class Decoder
     }
 
     /**
+     * Spec-required reader checks on the parsed tag set:
+     *
+     *   - At least one valid `p` (payment_hash) tag MUST be present. If the
+     *     invoice contained only wrong-length `p` candidates, parseTags will
+     *     have skipped them all and we fail here. (Same applies to `s`, `n`.)
+     *   - A reader MUST fail the payment if a valid `s` tag is not provided.
+     *   - A reader MUST fail the payment if neither `d` nor `h` is present,
+     *     or if both are present.
+     *
+     * @param list<Tag> $tags
+     */
+    private static function validateRequiredTagPresence(array $tags): void
+    {
+        $hasPaymentHash = false;
+        $hasPaymentSecret = false;
+        $hasDescription = false;
+        $hasDescriptionHash = false;
+        foreach ($tags as $tag) {
+            match ($tag->tagName) {
+                'payment_hash' => $hasPaymentHash = true,
+                'payment_secret' => $hasPaymentSecret = true,
+                'description' => $hasDescription = true,
+                'purpose_commit_hash' => $hasDescriptionHash = true,
+                default => null,
+            };
+        }
+
+        if (!$hasPaymentHash) {
+            throw new InvalidInvoiceException('Invoice must contain a payment_hash (p) tag');
+        }
+        if (!$hasPaymentSecret) {
+            throw new InvalidInvoiceException('Invoice must contain a payment_secret (s) tag');
+        }
+        if (!$hasDescription && !$hasDescriptionHash) {
+            throw new InvalidInvoiceException(
+                'Invoice must contain a description (d) or description_hash (h) tag',
+            );
+        }
+        if ($hasDescription && $hasDescriptionHash) {
+            throw new InvalidInvoiceException(
+                'Invoice must not contain both description (d) and description_hash (h) tags',
+            );
+        }
+    }
+
+    /**
+     * Spec: a reader MUST fail the payment if the `9` field contains unknown
+     * even feature bits that are non-zero. Unknown odd bits MUST be ignored.
+     * Additionally, BOLT 9 says "if the feature vector does not set all
+     * known, transitive feature dependencies: MUST NOT attempt the payment."
+     *
+     * "Unknown" is relative to this implementation's known-feature map (see
+     * FeatureBits::KNOWN_FEATURES). Bits not in that map land in
+     * `extraBits.bits`; if any of them is even, decode fails here.
+     *
+     * @param list<Tag> $tags
+     */
+    private static function validateFeatureBits(array $tags): void
+    {
+        foreach ($tags as $tag) {
+            if (!($tag->tagName === 'feature_bits' && $tag->data instanceof FeatureBits)) {
+                continue;
+            }
+            $fb = $tag->data;
+
+            if ($fb->extraBits !== null && $fb->extraBits['has_required']) {
+                throw new InvalidInvoiceException(
+                    'Invoice requires unknown feature bits (unknown even bit set in `9` field)',
+                );
+            }
+
+            self::validateFeatureBitDependencies($fb);
+        }
+    }
+
+    /**
+     * Enforce the BOLT 9 transitive-dependency chain that's relevant for
+     * invoice context:
+     *   basic_mpp (16/17) → payment_secret (14/15) → var_onion_optin (8/9)
+     *
+     * If a feature is set (required OR supported), all its dependencies must
+     * be set too (in either flavour). The spec phrases this as a payer-side
+     * rule, but the only sensible point to enforce it for an invoice library
+     * is at decode.
+     */
+    private static function validateFeatureBitDependencies(FeatureBits $fb): void
+    {
+        $isSet = static fn (?array $f): bool => $f !== null && ($f['required'] || $f['supported']);
+
+        if ($isSet($fb->paymentSecret) && !$isSet($fb->varOnionOptin)) {
+            throw new InvalidInvoiceException(
+                'BOLT 9 dependency violation: payment_secret requires var_onion_optin',
+            );
+        }
+        if ($isSet($fb->basicMpp) && !$isSet($fb->paymentSecret)) {
+            throw new InvalidInvoiceException(
+                'BOLT 9 dependency violation: basic_mpp requires payment_secret',
+            );
+        }
+    }
+
+    /**
+     * Spec: a reader SHOULD treat `c`, `x`, and `9` fields as invalid if they
+     * begin with zero field elements (non-minimal encoding). This catches
+     * malicious or malformed writers; honest writers always emit the shortest
+     * representation. Single-zero `[0]` is canonical for the value 0 and is
+     * NOT flagged.
+     *
+     * @param list<int> $words
+     */
+    private static function ensureMinimalEncoding(string $name, array $words): void
+    {
+        if (count($words) > 1 && $words[0] === 0) {
+            throw new InvalidInvoiceException(
+                sprintf('%s tag has non-minimal encoding (leading zero word)', $name),
+            );
+        }
+    }
+
+    /**
      * Parse tags from 5-bit words.
      *
      * @param list<int> $words
@@ -118,14 +257,11 @@ final class Decoder
     private static function parseTags(array $words): array
     {
         $tags = [];
-        $pos = 0;
         $wordCount = count($words);
+        $pos = 0;
 
-        while ($pos < $wordCount) {
-            if ($pos + 3 > $wordCount) {
-                break; // Malformed trailing data
-            }
-
+        while ($pos + 3 <= $wordCount) {
+            \assert($pos >= 0);
             $type = $words[$pos];
             $dataLen = $words[$pos + 1] * 32 + $words[$pos + 2];
             $tagEnd = $pos + 3 + $dataLen;
@@ -159,18 +295,65 @@ final class Decoder
         return match ($name) {
             'payment_hash', 'payment_secret', 'purpose_commit_hash' => self::parseHashTag($name, $words, $dataLen),
             'payee' => self::parsePayeeTag($words, $dataLen),
-            'description' => new Tag('description', Bech32::bytesToString(Bech32::fiveToEightTrim($words))),
+            'description' => self::parseDescriptionTag($words),
             'metadata' => new Tag('metadata', Bech32::bytesToHex(Bech32::fiveToEightTrim($words))),
-            'expire_time' => new Tag('expire_time', Bech32::wordsToInt($words)),
-            'min_final_cltv_expiry' => new Tag('min_final_cltv_expiry', Bech32::wordsToInt($words)),
-            'fallback_address' => new Tag('fallback_address', self::parseFallbackAddress($words)),
+            'expire_time', 'min_final_cltv_expiry' => self::parseIntTag($name, $words),
+            'fallback_address' => self::parseFallbackTag($words),
             'route_hint' => new Tag('route_hint', self::parseRouteHint($words)),
-            'feature_bits' => new Tag('feature_bits', FeatureBits::fromWords($words)),
+            'feature_bits' => self::parseFeatureBitsTag($words),
             default => null,
         };
     }
 
     /**
+     * Decode the `d` (description) tag and validate UTF-8.
+     *
+     * @param list<int> $words
+     */
+    private static function parseDescriptionTag(array $words): Tag
+    {
+        $str = Bech32::bytesToString(Bech32::fiveToEightTrim($words));
+        if ($str !== '' && !mb_check_encoding($str, 'UTF-8')) {
+            throw new InvalidInvoiceException('description (d) tag is not valid UTF-8');
+        }
+
+        return new Tag('description', $str);
+    }
+
+    /**
+     * Decode an integer-valued variable-length tag (`x`, `c`), rejecting
+     * non-minimal encodings.
+     *
+     * @param list<int> $words
+     */
+    private static function parseIntTag(string $name, array $words): Tag
+    {
+        self::ensureMinimalEncoding($name, $words);
+
+        return new Tag($name, Bech32::wordsToInt($words));
+    }
+
+    /**
+     * Decode the `9` (feature_bits) tag, rejecting non-minimal encodings.
+     *
+     * @param list<int> $words
+     */
+    private static function parseFeatureBitsTag(array $words): Tag
+    {
+        self::ensureMinimalEncoding('feature_bits', $words);
+
+        return new Tag('feature_bits', FeatureBits::fromWords($words));
+    }
+
+    /**
+     * Per spec test vector 12, a `p`/`h`/`s` tag with the wrong data_length is
+     * silently skipped (not a hard failure). The required-presence check
+     * after parseTags catches the case where every candidate is wrong-length.
+     *
+     * 52 5-bit words encode 260 bits; the payload is 256 bits (32 bytes), so
+     * the lower 4 bits of the last word are padding and MUST be zero per
+     * canonical encoding.
+     *
      * @param list<int> $words
      */
     private static function parseHashTag(string $name, array $words, int $dataLen): ?Tag
@@ -178,17 +361,29 @@ final class Decoder
         if ($dataLen !== 52) {
             return null;
         }
+        if (($words[51] & 0x0F) !== 0) {
+            throw new InvalidInvoiceException(
+                sprintf('%s tag has non-zero padding bits', $name),
+            );
+        }
 
         return new Tag($name, Bech32::bytesToHex(Bech32::fiveToEightTrim($words)));
     }
 
     /**
+     * Same wrong-length-skip rule as parseHashTag, but for the 53-word `n` tag.
+     * 53 5-bit words encode 265 bits; the payload is 264 bits (33 bytes), so
+     * the lowest bit of the last word is padding and MUST be zero.
+     *
      * @param list<int> $words
      */
     private static function parsePayeeTag(array $words, int $dataLen): ?Tag
     {
         if ($dataLen !== 53) {
             return null;
+        }
+        if (($words[52] & 0x01) !== 0) {
+            throw new InvalidInvoiceException('payee node key tag has non-zero padding bit');
         }
 
         return new Tag('payee', Bech32::bytesToHex(Bech32::fiveToEightTrim($words)));
@@ -197,20 +392,40 @@ final class Decoder
     /**
      * @param list<int> $words
      */
-    private static function parseFallbackAddress(array $words): FallbackAddress
+    private static function parseFallbackTag(array $words): ?Tag
     {
         if ($words === []) {
-            throw new InvalidInvoiceException('Empty fallback address');
+            return null;
         }
 
         $version = $words[0];
-        $addrBytes = Bech32::fiveToEightTrim(array_slice($words, 1));
+        // Per spec, valid version codes are 0–16 (segwit) plus 17 (P2PKH) and 18 (P2SH).
+        // Readers MUST skip `f` fields with any other version.
+        if ($version > 18) {
+            return null;
+        }
 
-        return new FallbackAddress(
+        $addrBytes = Bech32::fiveToEightTrim(array_slice($words, 1));
+        $len = count($addrBytes);
+
+        // Validate the witness/script length for known address types.
+        // Skip (return null) on length mismatch — same lenience as wrong-length
+        // p/h/s/n; the address is malformed but the rest of the invoice is
+        // still parseable.
+        $valid = match (true) {
+            $version === 17 || $version === 18 => $len === 20,        // P2PKH / P2SH
+            $version === 0 => $len === 20 || $len === 32,             // P2WPKH or P2WSH
+            $version === 1 => $len === 32,                            // P2TR
+            default => $len >= 2 && $len <= 40,                       // BIP-141 segwit v2-16
+        };
+        if (!$valid) {
+            return null;
+        }
+
+        return new Tag('fallback_address', new FallbackAddress(
             code: $version,
-            address: '',
             addressHash: Bech32::bytesToHex($addrBytes),
-        );
+        ));
     }
 
     /**
@@ -220,10 +435,20 @@ final class Decoder
     private static function parseRouteHint(array $words): array
     {
         $bytes = Bech32::fiveToEightTrim($words);
-        $routes = [];
-        $hop = 51; // 33+8+4+4+2
+        $byteCount = count($bytes);
+        $hop = 51; // 33 (pubkey) + 8 (scid) + 4 (fee_base) + 4 (fee_prop) + 2 (cltv)
 
-        for ($i = 0; $i + $hop <= count($bytes); $i += $hop) {
+        // Per spec, an `r` field contains "one or more entries"; each entry is
+        // exactly 51 bytes. Reject empty hint vectors and any trailing
+        // partial-hop bytes instead of silently truncating.
+        if ($byteCount === 0 || $byteCount % $hop !== 0) {
+            throw new InvalidInvoiceException(
+                sprintf('Route hint must be a positive multiple of %d bytes, got %d', $hop, $byteCount),
+            );
+        }
+
+        $routes = [];
+        for ($i = 0; $i < $byteCount; $i += $hop) {
             $routes[] = new RouteHint(
                 pubkey: Bech32::bytesToHex(array_slice($bytes, $i, 33)),
                 shortChannelId: Bech32::bytesToHex(array_slice($bytes, $i + 33, 8)),
@@ -237,7 +462,17 @@ final class Decoder
     }
 
     /**
-     * Recover or verify the payee's public key from the signature.
+     * Resolve the payee's public key from the signature, honouring BOLT 11's
+     * branching reader requirements:
+     *
+     *   - if a valid `n` tag is provided: the tag MUST be used to validate the
+     *     signature, AND the signature MUST be low-S. (We implement the
+     *     "validate" step as recover-and-compare, which is functionally
+     *     equivalent to ECDSA verification when the signature is low-S.)
+     *   - otherwise: perform ECDSA public-key recovery, accepting both
+     *     high-S and low-S signatures.
+     *
+     * Spec: https://github.com/lightning/bolts/blob/master/11-payment-encoding.md
      *
      * @param list<int> $sigHash SHA-256 hash bytes
      * @param list<int> $sigBytes 64-byte compact signature
@@ -246,14 +481,46 @@ final class Decoder
      */
     private static function resolvePayeeKey(array $sigHash, array $sigBytes, int $recoveryFlag, array $tags): ?string
     {
-        // Check for explicit payee tag first
+        $explicit = null;
         foreach ($tags as $tag) {
             if ($tag->tagName === 'payee' && is_string($tag->data)) {
-                return $tag->data;
+                $explicit = $tag->data;
+                break;
             }
         }
 
+        if ($explicit !== null) {
+            if (self::isHighS($sigBytes)) {
+                throw new InvalidSignatureException(
+                    'high-S signature is not valid when payee node key (n) tag is present',
+                );
+            }
+
+            $recovered = self::recoverPublicKey($sigHash, $sigBytes, $recoveryFlag);
+            if ($recovered === null || strtolower($recovered) !== strtolower($explicit)) {
+                throw new InvalidSignatureException(
+                    'payee node key tag does not match the key recovered from the signature',
+                );
+            }
+
+            return $explicit;
+        }
+
         return self::recoverPublicKey($sigHash, $sigBytes, $recoveryFlag);
+    }
+
+    /**
+     * Detect whether a compact ECDSA signature uses a high-S value (S > n/2).
+     *
+     * @param list<int> $sigBytes 64-byte compact R||S signature
+     */
+    private static function isHighS(array $sigBytes): bool
+    {
+        $sHex = Bech32::bytesToHex(array_slice($sigBytes, 32, 32));
+        $s = gmp_init($sHex, 16);
+        $halfN = gmp_div_q(EccFactory::getSecgCurves()->generator256k1()->getOrder(), 2);
+
+        return gmp_cmp($s, $halfN) > 0;
     }
 
     /**
@@ -320,17 +587,8 @@ final class Decoder
      */
     private static function sha256Bytes(array $bytes): array
     {
-        $binary = '';
-        foreach ($bytes as $b) {
-            $binary .= chr($b & 0xFF);
-        }
+        $hash = hash('sha256', pack('C*', ...$bytes), true);
 
-        $hash = hash('sha256', $binary, true);
-        $result = [];
-        for ($i = 0; $i < strlen($hash); $i++) {
-            $result[] = ord($hash[$i]);
-        }
-
-        return $result;
+        return array_map(ord(...), str_split($hash));
     }
 }

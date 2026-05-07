@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace Nova\Bitcoin\Bolt11\Tests;
 
+use Nova\Bitcoin\Bolt11\Decoder;
 use Nova\Bitcoin\Bolt11\Encoder;
+use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
 use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
+use Nova\Bitcoin\Bolt11\Exception\InvalidSignatureException;
+use Nova\Bitcoin\Bolt11\Invoice;
 use Nova\Bitcoin\Bolt11\Network;
 use Nova\Bitcoin\Bolt11\Signer;
 use Nova\Bitcoin\Bolt11\Tag;
@@ -19,6 +23,9 @@ final class EncoderTest extends TestCase
     private const string PRIVATE_KEY = 'e126f68f7eafcc8b74f54d269fe206be715000f94dac067d1c04a8ca3b2db734';
     private const string SPEC_PUBKEY = '03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad';
 
+    /**
+     * @return list<Tag>
+     */
     private function makeBasicTags(): array
     {
         return [
@@ -51,22 +58,9 @@ final class EncoderTest extends TestCase
         self::assertSame('1 cup coffee', $pr->getDescription());
     }
 
-    public function testUnsignedInvoiceHasWordsTemp(): void
-    {
-        $pr = Encoder::encode(
-            network: Network::Bitcoin,
-            satoshis: 1000,
-            timestamp: 1496314658,
-            tags: $this->makeBasicTags(),
-        );
-
-        self::assertNotEmpty($pr->wordsTemp);
-        self::assertStringStartsWith('lnbc', $pr->wordsTemp);
-    }
-
     public function testHrpGenerationForVariousAmounts(): void
     {
-        $makeEncode = fn (?int $sat = null, ?string $msat = null) => Encoder::encode(
+        $makeEncode = fn (?int $sat = null, ?string $msat = null): Invoice => Encoder::encode(
             network: Network::Bitcoin,
             satoshis: $sat,
             millisatoshis: $msat,
@@ -137,6 +131,7 @@ final class EncoderTest extends TestCase
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
         self::assertTrue($signed->complete);
+        self::assertNotNull($signed->paymentRequest);
         self::assertStringStartsWith('lnbc', $signed->paymentRequest);
         self::assertSame(self::SPEC_PUBKEY, $signed->payeeNodeKey);
         self::assertSame(128, strlen($signed->signature)); // 64 bytes hex
@@ -158,6 +153,7 @@ final class EncoderTest extends TestCase
 
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
+        self::assertNotNull($signed->paymentRequest);
         self::assertStringStartsWith('lntb', $signed->paymentRequest);
     }
 
@@ -172,7 +168,170 @@ final class EncoderTest extends TestCase
 
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
+        self::assertNotNull($signed->paymentRequest);
         self::assertStringStartsWith('lntbs', $signed->paymentRequest);
+    }
+
+    /**
+     * Spec: "MUST NOT include an amount of 0 millisatoshis."
+     * Without the fix, satoshis=0 falls through to msatToHrpString(0) and emits "0p",
+     * producing a malformed prefix "lnbc0p" that no conformant reader will parse.
+     */
+    public function testZeroSatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            satoshis: 0,
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    public function testNegativeSatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            satoshis: -1,
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    public function testNonNumericMillisatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            millisatoshis: 'abc',
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    public function testNegativeMillisatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            millisatoshis: '-100',
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    public function testInvalidUtf8DescriptionRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('UTF-8');
+
+        Tag::description("\xff\xfe invalid utf-8");
+    }
+
+    public function testNegativeExpiryRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        Tag::expiry(-1);
+    }
+
+    public function testNegativeMinFinalCltvExpiryRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        Tag::minFinalCltvExpiry(-1);
+    }
+
+    public function testFallbackAddressWrongLengthForP2pkhRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('Invalid fallback');
+
+        // P2PKH (code 17) requires a 20-byte hash; we pass 19 bytes.
+        Tag::fallbackAddress(17, str_repeat('aa', 19));
+    }
+
+    public function testFallbackAddressWrongLengthForP2trRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        // P2TR (segwit v1) requires a 32-byte hash; we pass 20 bytes.
+        Tag::fallbackAddress(1, str_repeat('aa', 20));
+    }
+
+    public function testFallbackAddressUnknownVersionRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        Tag::fallbackAddress(20, str_repeat('aa', 20));
+    }
+
+    public function testFallbackAddressNonHexRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('hex');
+
+        Tag::fallbackAddress(17, 'zz' . str_repeat('aa', 19));
+    }
+
+    public function testZeroMillisatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            millisatoshis: '0',
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    /**
+     * Per BOLT 11, "MUST set `n` to the public key used to create the
+     * `signature`." If a writer constructs an unsigned invoice with an `n`
+     * tag claiming a different pubkey than the signing key, the Signer must
+     * fail-fast — otherwise the writer would emit an invoice that no
+     * compliant reader will accept.
+     */
+    public function testSignerRejectsMismatchedPayeeNodeKey(): void
+    {
+        $unsigned = Encoder::encode(
+            network: Network::Bitcoin,
+            satoshis: 1000,
+            timestamp: 1700000000,
+            tags: [
+                Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+                Tag::description('mismatched n tag'),
+                Tag::payeeNodeKey('029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255'),
+            ],
+        );
+
+        $this->expectException(InvalidSignatureException::class);
+        $this->expectExceptionMessage('does not match the public key derived from the signing private key');
+
+        Signer::sign($unsigned, self::PRIVATE_KEY);
+    }
+
+    /**
+     * The matching case: when an `n` tag is present and equals the recovered
+     * key, decode succeeds and surfaces the tagged value.
+     */
+    public function testMatchingPayeeNodeKeyTagAccepted(): void
+    {
+        $unsigned = Encoder::encode(
+            network: Network::Bitcoin,
+            satoshis: 1000,
+            timestamp: 1700000000,
+            tags: [
+                Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+                Tag::description('matching n tag'),
+                Tag::payeeNodeKey(self::SPEC_PUBKEY),
+            ],
+        );
+
+        $signed = Signer::sign($unsigned, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
+
+        $decoded = Decoder::decode($signed->paymentRequest);
+
+        self::assertSame(self::SPEC_PUBKEY, $decoded->payeeNodeKey);
     }
 
     public function testRegtestInvoice(): void
@@ -186,6 +345,7 @@ final class EncoderTest extends TestCase
 
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
+        self::assertNotNull($signed->paymentRequest);
         self::assertStringStartsWith('lnbcrt', $signed->paymentRequest);
     }
 }

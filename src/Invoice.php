@@ -12,7 +12,6 @@ final readonly class Invoice
     /**
      * @param bool $complete Whether the invoice is fully signed
      * @param string $prefix The full HRP prefix (e.g. 'lnbc2500u')
-     * @param string $wordsTemp Temporary bech32 string (unsigned)
      * @param Network|null $network The Bitcoin network
      * @param int|null $satoshis Amount in satoshis (null if sub-sat or no amount)
      * @param string|null $millisatoshis Amount in millisatoshis as string
@@ -29,7 +28,6 @@ final readonly class Invoice
     public function __construct(
         public bool $complete,
         public string $prefix,
-        public string $wordsTemp,
         public ?Network $network,
         public ?int $satoshis,
         public ?string $millisatoshis,
@@ -158,6 +156,33 @@ final readonly class Invoice
     }
 
     /**
+     * Check that a known description matches what this invoice commits to.
+     *
+     * - If the invoice carries a literal `d` tag, returns true iff it equals
+     *   $description (byte-exact).
+     * - If the invoice carries a `h` (description_hash) tag, returns true iff
+     *   sha256($description) hex equals the tag value (constant-time).
+     * - If the invoice carries neither, returns false.
+     *
+     * Per BOLT 11, readers MUST check the SHA256 hash in `h` against the
+     * out-of-band description before paying. Use this helper for that check.
+     */
+    public function verifyDescription(string $description): bool
+    {
+        $hash = $this->getDescriptionHash();
+        if ($hash !== null) {
+            return hash_equals(strtolower($hash), hash('sha256', $description));
+        }
+
+        $stored = $this->getDescription();
+        if ($stored !== null) {
+            return $stored === $description;
+        }
+
+        return false;
+    }
+
+    /**
      * Check if this invoice has expired.
      */
     public function isExpired(): bool
@@ -212,7 +237,6 @@ final readonly class Invoice
         return new self(
             complete: $complete ?? $this->complete,
             prefix: $prefix ?? $this->prefix,
-            wordsTemp: $this->wordsTemp,
             network: $this->network,
             satoshis: $this->satoshis,
             millisatoshis: $this->millisatoshis,

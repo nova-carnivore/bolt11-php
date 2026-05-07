@@ -187,6 +187,58 @@ final class EncoderTest extends TestCase
         );
     }
 
+    public function testNegativeSatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            satoshis: -1,
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    public function testNonNumericMillisatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            millisatoshis: 'abc',
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    public function testNegativeMillisatoshisRejected(): void
+    {
+        $this->expectException(InvalidAmountException::class);
+
+        Encoder::encode(
+            millisatoshis: '-100',
+            tags: $this->makeBasicTags(),
+        );
+    }
+
+    public function testInvalidUtf8DescriptionRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('UTF-8');
+
+        Tag::description("\xff\xfe invalid utf-8");
+    }
+
+    public function testNegativeExpiryRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        Tag::expiry(-1);
+    }
+
+    public function testNegativeMinFinalCltvExpiryRejected(): void
+    {
+        $this->expectException(InvalidInvoiceException::class);
+
+        Tag::minFinalCltvExpiry(-1);
+    }
+
     public function testZeroMillisatoshisRejected(): void
     {
         $this->expectException(InvalidAmountException::class);

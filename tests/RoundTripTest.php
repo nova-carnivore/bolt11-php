@@ -182,6 +182,49 @@ final class RoundTripTest extends TestCase
         self::assertNull($decoded->getDescription());
     }
 
+    public function testVerifyDescriptionWithLiteralDTag(): void
+    {
+        $original = Encoder::encode(
+            network: Network::Bitcoin,
+            satoshis: 1000,
+            timestamp: 1700000000,
+            tags: [
+                Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+                Tag::description('Order #42'),
+            ],
+        );
+        $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
+        $decoded = Decoder::decode($signed->paymentRequest);
+
+        self::assertTrue($decoded->verifyDescription('Order #42'));
+        self::assertFalse($decoded->verifyDescription('Order #43'));
+    }
+
+    public function testVerifyDescriptionWithHashTag(): void
+    {
+        $description = 'A long product description that is committed to via h tag';
+        $hash = hash('sha256', $description);
+
+        $original = Encoder::encode(
+            network: Network::Bitcoin,
+            satoshis: 1000,
+            timestamp: 1700000000,
+            tags: [
+                Tag::paymentHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                Tag::paymentSecret('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+                Tag::descriptionHash($hash),
+            ],
+        );
+        $signed = Signer::sign($original, self::PRIVATE_KEY);
+        self::assertNotNull($signed->paymentRequest);
+        $decoded = Decoder::decode($signed->paymentRequest);
+
+        self::assertTrue($decoded->verifyDescription($description));
+        self::assertFalse($decoded->verifyDescription('different description'));
+    }
+
     public function testRoundTripWithCltvExpiry(): void
     {
         $original = Encoder::encode(

@@ -167,6 +167,24 @@ final class Decoder
     }
 
     /**
+     * Spec: a reader SHOULD treat `c`, `x`, and `9` fields as invalid if they
+     * begin with zero field elements (non-minimal encoding). This catches
+     * malicious or malformed writers; honest writers always emit the shortest
+     * representation. Single-zero `[0]` is canonical for the value 0 and is
+     * NOT flagged.
+     *
+     * @param list<int> $words
+     */
+    private static function ensureMinimalEncoding(string $name, array $words): void
+    {
+        if (count($words) > 1 && $words[0] === 0) {
+            throw new InvalidInvoiceException(
+                sprintf('%s tag has non-minimal encoding (leading zero word)', $name),
+            );
+        }
+    }
+
+    /**
      * Parse tags from 5-bit words.
      *
      * @param list<int> $words
@@ -213,15 +231,54 @@ final class Decoder
         return match ($name) {
             'payment_hash', 'payment_secret', 'purpose_commit_hash' => self::parseHashTag($name, $words, $dataLen),
             'payee' => self::parsePayeeTag($words, $dataLen),
-            'description' => new Tag('description', Bech32::bytesToString(Bech32::fiveToEightTrim($words))),
+            'description' => self::parseDescriptionTag($words),
             'metadata' => new Tag('metadata', Bech32::bytesToHex(Bech32::fiveToEightTrim($words))),
-            'expire_time' => new Tag('expire_time', Bech32::wordsToInt($words)),
-            'min_final_cltv_expiry' => new Tag('min_final_cltv_expiry', Bech32::wordsToInt($words)),
+            'expire_time', 'min_final_cltv_expiry' => self::parseIntTag($name, $words),
             'fallback_address' => self::parseFallbackTag($words),
             'route_hint' => new Tag('route_hint', self::parseRouteHint($words)),
-            'feature_bits' => new Tag('feature_bits', FeatureBits::fromWords($words)),
+            'feature_bits' => self::parseFeatureBitsTag($words),
             default => null,
         };
+    }
+
+    /**
+     * Decode the `d` (description) tag and validate UTF-8.
+     *
+     * @param list<int> $words
+     */
+    private static function parseDescriptionTag(array $words): Tag
+    {
+        $str = Bech32::bytesToString(Bech32::fiveToEightTrim($words));
+        if ($str !== '' && !mb_check_encoding($str, 'UTF-8')) {
+            throw new InvalidInvoiceException('description (d) tag is not valid UTF-8');
+        }
+
+        return new Tag('description', $str);
+    }
+
+    /**
+     * Decode an integer-valued variable-length tag (`x`, `c`), rejecting
+     * non-minimal encodings.
+     *
+     * @param list<int> $words
+     */
+    private static function parseIntTag(string $name, array $words): Tag
+    {
+        self::ensureMinimalEncoding($name, $words);
+
+        return new Tag($name, Bech32::wordsToInt($words));
+    }
+
+    /**
+     * Decode the `9` (feature_bits) tag, rejecting non-minimal encodings.
+     *
+     * @param list<int> $words
+     */
+    private static function parseFeatureBitsTag(array $words): Tag
+    {
+        self::ensureMinimalEncoding('feature_bits', $words);
+
+        return new Tag('feature_bits', FeatureBits::fromWords($words));
     }
 
     /**
@@ -271,6 +328,21 @@ final class Decoder
         }
 
         $addrBytes = Bech32::fiveToEightTrim(array_slice($words, 1));
+        $len = count($addrBytes);
+
+        // Validate the witness/script length for known address types.
+        // Skip (return null) on length mismatch — same lenience as wrong-length
+        // p/h/s/n; the address is malformed but the rest of the invoice is
+        // still parseable.
+        $valid = match (true) {
+            $version === 17 || $version === 18 => $len === 20,        // P2PKH / P2SH
+            $version === 0 => $len === 20 || $len === 32,             // P2WPKH or P2WSH
+            $version === 1 => $len === 32,                            // P2TR
+            default => $len >= 2 && $len <= 40,                       // BIP-141 segwit v2-16
+        };
+        if (!$valid) {
+            return null;
+        }
 
         return new Tag('fallback_address', new FallbackAddress(
             code: $version,
@@ -285,10 +357,20 @@ final class Decoder
     private static function parseRouteHint(array $words): array
     {
         $bytes = Bech32::fiveToEightTrim($words);
-        $routes = [];
-        $hop = 51; // 33+8+4+4+2
+        $byteCount = count($bytes);
+        $hop = 51; // 33 (pubkey) + 8 (scid) + 4 (fee_base) + 4 (fee_prop) + 2 (cltv)
 
-        for ($i = 0; $i + $hop <= count($bytes); $i += $hop) {
+        // Per spec, an `r` field contains "one or more entries"; each entry is
+        // exactly 51 bytes. Reject empty hint vectors and any trailing
+        // partial-hop bytes instead of silently truncating.
+        if ($byteCount === 0 || $byteCount % $hop !== 0) {
+            throw new InvalidInvoiceException(
+                sprintf('Route hint must be a positive multiple of %d bytes, got %d', $hop, $byteCount),
+            );
+        }
+
+        $routes = [];
+        for ($i = 0; $i < $byteCount; $i += $hop) {
             $routes[] = new RouteHint(
                 pubkey: Bech32::bytesToHex(array_slice($bytes, $i, 33)),
                 shortChannelId: Bech32::bytesToHex(array_slice($bytes, $i + 33, 8)),

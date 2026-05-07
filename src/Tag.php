@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nova\Bitcoin\Bolt11;
 
+use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
+
 /**
  * Represents a single tagged field in a BOLT 11 invoice.
  */
@@ -37,9 +39,15 @@ final readonly class Tag
 
     /**
      * Create a description tag (UTF-8 string).
+     *
+     * Per BOLT 11, `d` MUST be valid UTF-8.
      */
     public static function description(string $text): self
     {
+        if ($text !== '' && !mb_check_encoding($text, 'UTF-8')) {
+            throw new InvalidInvoiceException('description must be valid UTF-8');
+        }
+
         return new self('description', $text);
     }
 
@@ -64,6 +72,10 @@ final readonly class Tag
      */
     public static function expiry(int $seconds): self
     {
+        if ($seconds < 0) {
+            throw new InvalidInvoiceException('expiry must not be negative');
+        }
+
         return new self('expire_time', $seconds);
     }
 
@@ -72,6 +84,10 @@ final readonly class Tag
      */
     public static function minFinalCltvExpiry(int $blocks): self
     {
+        if ($blocks < 0) {
+            throw new InvalidInvoiceException('min_final_cltv_expiry must not be negative');
+        }
+
         return new self('min_final_cltv_expiry', $blocks);
     }
 

@@ -27,6 +27,7 @@ final class Encoder
         array $tags = [],
         ?int $timestamp = null,
     ): Invoice {
+        self::validateAmounts($satoshis, $millisatoshis);
         self::validateTags($tags);
 
         $timestamp ??= time();
@@ -222,6 +223,23 @@ final class Encoder
         }
 
         return $tag->data->toWords();
+    }
+
+    /**
+     * Reject negative satoshis and non-numeric / negative millisatoshis at
+     * the writer boundary. `(int) "abc"` quietly returns 0, which would
+     * otherwise make malformed strings look like valid amounts.
+     */
+    private static function validateAmounts(?int $satoshis, ?string $millisatoshis): void
+    {
+        if ($satoshis !== null && $satoshis < 0) {
+            throw new InvalidAmountException('satoshis must not be negative');
+        }
+        if ($millisatoshis !== null && !preg_match('/^\d+$/', $millisatoshis)) {
+            throw new InvalidAmountException(
+                sprintf('millisatoshis must be a non-negative integer string, got "%s"', $millisatoshis),
+            );
+        }
     }
 
     /**

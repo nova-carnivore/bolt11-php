@@ -23,6 +23,18 @@ final class DecoderTest extends TestCase
         $this->expectException(InvalidChecksumException::class);
 
         Decoder::decode(
+            'lnbc25m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5vdhkven9v5sxyetpdeessp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygs9q5sqqqqqqqqqqqqqqqqsgq2a25dxl5hrntdtn6zvydt7d66hyzsyhqs4wdynavys42xgl6sgx9c4g7me86a27t07mdtfry458rtjr0v92cnmswpsjscgt2vcse3sgpxxxxxx',
+        );
+    }
+
+    public function testMixedCaseRejected(): void
+    {
+        // Same body as testInvalidChecksum but with mixed case at the tail.
+        // Mixed case must fail with a typed exception, not crash.
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('Mixed-case');
+
+        Decoder::decode(
             'lnbc25m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5vdhkven9v5sxyetpdeessp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygs9q5sqqqqqqqqqqqqqqqqsgq2a25dxl5hrntdtn6zvydt7d66hyzsyhqs4wdynavys42xgl6sgx9c4g7me86a27t07mdtfry458rtjr0v92cnmswpsjscgt2vcse3sgpXXXXXX',
         );
     }
@@ -107,6 +119,37 @@ final class DecoderTest extends TestCase
         return Bech32::encode($hrp, $words);
     }
 
+    /**
+     * Build a tag header (type, len_high, len_low) followed by the data words.
+     * Bypasses Encoder, so it can produce malformed payloads for testing.
+     *
+     * @param list<int> $data
+     * @return list<int>
+     */
+    private static function tagWords(int $type, array $data): array
+    {
+        $len = count($data);
+
+        return [$type, ($len >> 5) & 0x1f, $len & 0x1f, ...$data];
+    }
+
+    /**
+     * Like craftInvoice() but takes raw tag words (already including
+     * type/length headers).
+     *
+     * @param list<int> $tagWords
+     */
+    private function craftFromTagWords(array $tagWords, string $hrp = 'lnbc'): string
+    {
+        $words = [
+            ...Bech32::intToWords(1700000000, 7),
+            ...$tagWords,
+            ...array_fill(0, 104, 0),
+        ];
+
+        return Bech32::encode($hrp, $words);
+    }
+
     public function testMissingPaymentHashRejected(): void
     {
         $invoice = $this->craftInvoice([
@@ -142,6 +185,63 @@ final class DecoderTest extends TestCase
 
         $this->expectException(InvalidInvoiceException::class);
         $this->expectExceptionMessage('description');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testNonMinimalExpireTimeRejected(): void
+    {
+        // Expire-time encoded as [0, 1, 0] (= value 32 with a leading zero word).
+        // Build a tag manually: type 6, length 3, data [0, 1, 0].
+        $invoice = $this->craftFromTagWords([
+            // valid p
+            ...self::tagWords(1, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                )),
+            ]),
+            // valid s
+            ...self::tagWords(16, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                )),
+            ]),
+            // valid d
+            ...self::tagWords(13, Bech32::eightToFive(Bech32::stringToBytes('test'))),
+            // x with non-minimal encoding
+            ...self::tagWords(6, [0, 1, 0]),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('non-minimal');
+
+        Decoder::decode($invoice);
+    }
+
+    public function testRouteHintWithLeftoverBytesRejected(): void
+    {
+        // Construct a route hint whose decoded byte length is 51+5=56 (one full
+        // hop + 5 stray bytes). Spec says route hint must be a positive
+        // multiple of 51 bytes.
+        $oneHop = array_fill(0, 51, 0);
+        $stray = array_fill(0, 5, 0);
+        $invoice = $this->craftFromTagWords([
+            ...self::tagWords(1, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                )),
+            ]),
+            ...self::tagWords(16, [
+                ...Bech32::eightToFive(Bech32::hexToBytes(
+                    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                )),
+            ]),
+            ...self::tagWords(13, Bech32::eightToFive(Bech32::stringToBytes('test'))),
+            ...self::tagWords(3, Bech32::eightToFive([...$oneHop, ...$stray])),
+        ]);
+
+        $this->expectException(InvalidInvoiceException::class);
+        $this->expectExceptionMessage('multiple of 51');
 
         Decoder::decode($invoice);
     }

@@ -156,6 +156,33 @@ final readonly class Invoice
     }
 
     /**
+     * Check that a known description matches what this invoice commits to.
+     *
+     * - If the invoice carries a literal `d` tag, returns true iff it equals
+     *   $description (byte-exact).
+     * - If the invoice carries a `h` (description_hash) tag, returns true iff
+     *   sha256($description) hex equals the tag value (constant-time).
+     * - If the invoice carries neither, returns false.
+     *
+     * Per BOLT 11, readers MUST check the SHA256 hash in `h` against the
+     * out-of-band description before paying. Use this helper for that check.
+     */
+    public function verifyDescription(string $description): bool
+    {
+        $hash = $this->getDescriptionHash();
+        if ($hash !== null) {
+            return hash_equals(strtolower($hash), hash('sha256', $description));
+        }
+
+        $stored = $this->getDescription();
+        if ($stored !== null) {
+            return $stored === $description;
+        }
+
+        return false;
+    }
+
+    /**
      * Check if this invoice has expired.
      */
     public function isExpired(): bool

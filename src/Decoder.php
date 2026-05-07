@@ -122,14 +122,11 @@ final class Decoder
     private static function parseTags(array $words): array
     {
         $tags = [];
-        $pos = 0;
         $wordCount = count($words);
+        $pos = 0;
 
-        while ($pos < $wordCount) {
-            if ($pos + 3 > $wordCount) {
-                break; // Malformed trailing data
-            }
-
+        while ($pos + 3 <= $wordCount) {
+            \assert($pos >= 0);
             $type = $words[$pos];
             $dataLen = $words[$pos + 1] * 32 + $words[$pos + 2];
             $tagEnd = $pos + 3 + $dataLen;

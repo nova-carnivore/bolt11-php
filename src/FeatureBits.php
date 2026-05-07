@@ -59,7 +59,7 @@ final readonly class FeatureBits
             }
         }
 
-        $getBit = static fn (int $i): bool => $i < count($bits) && $bits[$i];
+        $getBit = static fn (int $i): bool => $i >= 0 && $i < count($bits) && $bits[$i];
 
         /**
          * @return array{required: bool, supported: bool}|null

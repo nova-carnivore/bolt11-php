@@ -82,6 +82,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   always throws `Bolt11Exception` rather than crashing with an uncaught
   error or warning. Seed is fixed so failures are reproducible.
 
+### Tooling
+
+- Added [Psalm](https://psalm.dev) (`vimeo/psalm: ^6.16`) at the strictest
+  setting (`errorLevel="1"`) with the official `psalm/plugin-phpunit` plugin
+  enabled. Psalm now infers types for 100% of the codebase. Wired into the
+  `composer ci` script and the GitHub Actions workflow.
+- Marked all leaf exception classes (`InvalidAmountException`,
+  `InvalidChecksumException`, `InvalidInvoiceException`,
+  `InvalidSignatureException`, `UnsupportedNetworkException`) as `final`.
+  The base `Bolt11Exception` remains extensible.
+
 ## [0.1.0] — Initial release
 
 - BOLT 11 Lightning Network invoice encoder, decoder, and signer for

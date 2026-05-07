@@ -34,6 +34,9 @@ jobs:
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse --no-progress
 
+      - name: Run Psalm
+        run: vendor/bin/psalm --no-progress
+
       - name: Check code style
         run: vendor/bin/php-cs-fixer fix --dry-run --diff
 

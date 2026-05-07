@@ -6,7 +6,6 @@ namespace Nova\Bitcoin\Bolt11;
 
 use GMP;
 use Mdanter\Ecc\Crypto\Key\PrivateKeyInterface;
-use Mdanter\Ecc\Crypto\Signature\Signature;
 use Mdanter\Ecc\Crypto\Signature\Signer as EccSigner;
 use Mdanter\Ecc\EccFactory;
 use Mdanter\Ecc\Primitives\GeneratorPoint;
@@ -66,7 +65,6 @@ final class Signer
         $r = $sig->getR();
         if (gmp_cmp($s, $halfN) > 0) {
             $s = gmp_sub($n, $s);
-            $sig = new Signature($r, $s);
         }
 
         $rHex = str_pad(gmp_strval($r, 16), 64, '0', STR_PAD_LEFT);

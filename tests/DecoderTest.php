@@ -78,7 +78,7 @@ final class DecoderTest extends TestCase
         $decoded = Bech32::decode($original);
         $words = $decoded['data'];
         $words[count($words) - 1] = 5; // invalid: must be 0–3
-        $tampered = Bech32::encode($decoded['hrp'], $words);
+        $tampered = Bech32::encode($decoded['hrp'], array_values($words));
 
         $this->expectException(InvalidSignatureException::class);
         $this->expectExceptionMessage('recovery flag');
@@ -101,7 +101,7 @@ final class DecoderTest extends TestCase
         for ($i = $count - 104; $i < $count - 1; $i++) {
             $words[$i] = 0;
         }
-        $tampered = Bech32::encode($decoded['hrp'], $words);
+        $tampered = Bech32::encode($decoded['hrp'], array_values($words));
 
         $invoice = Decoder::decode($tampered);
 

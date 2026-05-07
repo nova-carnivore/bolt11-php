@@ -98,12 +98,10 @@ final class SpecVectorsTest extends TestCase
 
         self::assertSame('tb', $d->network?->value);
         self::assertSame(2000000, $d->satoshis);
-        self::assertNotNull($d->getFallbackAddress());
-        self::assertSame(17, $d->getFallbackAddress()->code); // P2PKH
-        self::assertSame(
-            '3172b5654f6683c8fb146959d347ce303cae4ca7',
-            $d->getFallbackAddress()->addressHash,
-        );
+        $fallback = $d->getFallbackAddress();
+        self::assertNotNull($fallback);
+        self::assertSame(17, $fallback->code); // P2PKH
+        self::assertSame('3172b5654f6683c8fb146959d347ce303cae4ca7', $fallback->addressHash);
         self::assertSame(self::SPEC_PUBKEY, $d->payeeNodeKey);
     }
 
@@ -117,8 +115,9 @@ final class SpecVectorsTest extends TestCase
         self::assertSame(2000000, $d->satoshis);
 
         // Fallback: P2PKH
-        self::assertNotNull($d->getFallbackAddress());
-        self::assertSame(17, $d->getFallbackAddress()->code);
+        $fallback = $d->getFallbackAddress();
+        self::assertNotNull($fallback);
+        self::assertSame(17, $fallback->code);
 
         // Route hints: 2 hops
         $routes = $d->getRouteHints();
@@ -206,8 +205,9 @@ final class SpecVectorsTest extends TestCase
             $d->getPaymentHash(),
         );
         self::assertSame(10, $d->getTag('min_final_cltv_expiry')?->data);
-        self::assertNotNull($d->getRouteHints());
-        self::assertCount(1, $d->getRouteHints());
+        $routes = $d->getRouteHints();
+        self::assertNotNull($routes);
+        self::assertCount(1, $routes);
     }
 
     public function testVector11HighSSignatureRecovery(): void

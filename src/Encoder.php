@@ -31,9 +31,6 @@ final class Encoder
 
         $timestamp ??= time();
         $hrp = self::buildHRP($network, $satoshis, $millisatoshis);
-        $timestampWords = Bech32::intToWords($timestamp, 7);
-        $tagWords = self::encodeAllTags($tags);
-        $dataWords = [...$timestampWords, ...$tagWords];
 
         $expiryTag = null;
         foreach ($tags as $tag) {
@@ -206,7 +203,6 @@ final class Encoder
         }
 
         $hopBytes = [];
-        /** @var RouteHint $hop */
         foreach ($tag->data as $hop) {
             foreach ($hop->toBytes() as $b) {
                 $hopBytes[] = $b;

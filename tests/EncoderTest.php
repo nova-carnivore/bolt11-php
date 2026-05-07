@@ -7,6 +7,7 @@ namespace Nova\Bitcoin\Bolt11\Tests;
 use Nova\Bitcoin\Bolt11\Encoder;
 use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
 use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
+use Nova\Bitcoin\Bolt11\Invoice;
 use Nova\Bitcoin\Bolt11\Network;
 use Nova\Bitcoin\Bolt11\Signer;
 use Nova\Bitcoin\Bolt11\Tag;
@@ -20,6 +21,9 @@ final class EncoderTest extends TestCase
     private const string PRIVATE_KEY = 'e126f68f7eafcc8b74f54d269fe206be715000f94dac067d1c04a8ca3b2db734';
     private const string SPEC_PUBKEY = '03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad';
 
+    /**
+     * @return list<Tag>
+     */
     private function makeBasicTags(): array
     {
         return [
@@ -54,7 +58,7 @@ final class EncoderTest extends TestCase
 
     public function testHrpGenerationForVariousAmounts(): void
     {
-        $makeEncode = fn (?int $sat = null, ?string $msat = null) => Encoder::encode(
+        $makeEncode = fn (?int $sat = null, ?string $msat = null): Invoice => Encoder::encode(
             network: Network::Bitcoin,
             satoshis: $sat,
             millisatoshis: $msat,
@@ -125,6 +129,7 @@ final class EncoderTest extends TestCase
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
         self::assertTrue($signed->complete);
+        self::assertNotNull($signed->paymentRequest);
         self::assertStringStartsWith('lnbc', $signed->paymentRequest);
         self::assertSame(self::SPEC_PUBKEY, $signed->payeeNodeKey);
         self::assertSame(128, strlen($signed->signature)); // 64 bytes hex
@@ -146,6 +151,7 @@ final class EncoderTest extends TestCase
 
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
+        self::assertNotNull($signed->paymentRequest);
         self::assertStringStartsWith('lntb', $signed->paymentRequest);
     }
 
@@ -160,6 +166,7 @@ final class EncoderTest extends TestCase
 
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
+        self::assertNotNull($signed->paymentRequest);
         self::assertStringStartsWith('lntbs', $signed->paymentRequest);
     }
 
@@ -199,6 +206,7 @@ final class EncoderTest extends TestCase
 
         $signed = Signer::sign($pr, self::PRIVATE_KEY);
 
+        self::assertNotNull($signed->paymentRequest);
         self::assertStringStartsWith('lnbcrt', $signed->paymentRequest);
     }
 }

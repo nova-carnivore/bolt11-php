@@ -102,15 +102,15 @@ final class FuzzTest extends TestCase
         try {
             Decoder::decode($input);
             // Decoded successfully — that's also acceptable for some mutations.
-            $this->addToAssertionCount(1);
+            self::assertTrue(true);
         } catch (Bolt11Exception) {
             // Expected: any malformed input must throw a typed Bolt11Exception.
-            $this->addToAssertionCount(1);
+            self::assertTrue(true);
         } catch (\Throwable $t) {
             self::fail(sprintf(
                 'Unexpected uncaught %s on input %s: %s',
                 $t::class,
-                json_encode(substr($input, 0, 80), JSON_UNESCAPED_SLASHES),
+                (string) json_encode(substr($input, 0, 80), JSON_UNESCAPED_SLASHES),
                 $t->getMessage(),
             ));
         }

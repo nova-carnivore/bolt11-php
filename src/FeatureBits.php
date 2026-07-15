@@ -46,6 +46,10 @@ final readonly class FeatureBits
      * @param array{required: bool, supported: bool}|null $optionAttributionData Feature bits 36/37
      * @param array{required: bool, supported: bool}|null $optionPaymentMetadata Feature bits 48/49
      * @param array{bits: list<int>, has_required: bool}|null $extraBits Bits set outside the known set
+     * @param list<int>|null $rawWords The exact 5-bit words this was parsed from, if any.
+     *        When present, toWords() replays them verbatim so a decode→encode
+     *        round-trip is bit-identical (the required/supported view is lossy
+     *        and cannot, by itself, distinguish "required only" from "both bits").
      */
     public function __construct(
         public int $wordLength,
@@ -56,6 +60,7 @@ final readonly class FeatureBits
         public ?array $optionAttributionData = null,
         public ?array $optionPaymentMetadata = null,
         public ?array $extraBits = null,
+        private ?array $rawWords = null,
     ) {
     }
 
@@ -121,6 +126,7 @@ final readonly class FeatureBits
                 'bits' => $extraBitsArr,
                 'has_required' => $hasRequired,
             ],
+            rawWords: $words,
         );
     }
 
@@ -131,6 +137,15 @@ final readonly class FeatureBits
      */
     public function toWords(): array
     {
+        // Faithful round-trip: if this instance was parsed from the wire, emit
+        // the exact same words. The required/supported model is a lossy view
+        // (a required-only bit and a required+optional pair both read as
+        // required=true, supported=true), so re-deriving would corrupt the
+        // signed feature vector.
+        if ($this->rawWords !== null) {
+            return $this->rawWords;
+        }
+
         $totalBits = $this->wordLength * 5;
         $bits = array_fill(0, $totalBits, false);
 

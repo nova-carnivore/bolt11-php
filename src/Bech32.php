@@ -17,6 +17,13 @@ final class Bech32
 {
     private const string CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 
+    /**
+     * Generous upper bound on the input length. BOLT 11 lifts BIP-173's 90-char
+     * limit, but an unbounded decode lets a checksum-valid multi-megabyte string
+     * amplify CPU/memory. Real invoices are at most a few thousand characters.
+     */
+    private const int MAX_LENGTH = 20000;
+
     /** @var list<int> */
     private const array GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 
@@ -29,6 +36,12 @@ final class Bech32
      */
     public static function decode(string $str): array
     {
+        if (strlen($str) > self::MAX_LENGTH) {
+            throw new InvalidInvoiceException(
+                sprintf('Input exceeds maximum length of %d characters', self::MAX_LENGTH),
+            );
+        }
+
         // Per BIP-173, mixed-case strings are invalid. Accept all-lowercase
         // or all-uppercase, reject anything in between.
         if ($str !== strtolower($str) && $str !== strtoupper($str)) {
@@ -49,6 +62,16 @@ final class Bech32
         }
 
         $hrp = substr($input, 0, $sepIndex);
+
+        // Per BIP-173, every HRP character must be in the range [33, 126].
+        for ($i = 0; $i < strlen($hrp); $i++) {
+            $code = ord($hrp[$i]);
+            if ($code < 33 || $code > 126) {
+                throw new InvalidInvoiceException(
+                    'HRP contains a character outside the valid range [33,126] (BIP-173)',
+                );
+            }
+        }
         $dataStr = substr($input, $sepIndex + 1);
         $data = [];
 

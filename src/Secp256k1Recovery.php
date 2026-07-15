@@ -74,6 +74,14 @@ final class Secp256k1Recovery
         $sum = $sR->add($negHashG);
         $q = $sum->mul($rInv);
 
+        // A valid recovery must yield a real, finite curve point. paragonie/ecc
+        // represents the point at infinity with x=y=0, which compressPoint would
+        // otherwise serialise as a bogus "02"+64-zero "key". Reject it so such
+        // signatures are correctly treated as unrecoverable.
+        if ($q->isInfinity()) {
+            throw new \RuntimeException('Recovery failed: point at infinity');
+        }
+
         return self::compressPoint($q);
     }
 

@@ -5,6 +5,55 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+A security and spec-compliance hardening pass, driven by a full review against
+BOLT 11. All amount and tag-length arithmetic that touches untrusted input now
+runs through GMP, so `Decoder::decode()` always fails with a typed
+`Bolt11Exception` instead of a raw `TypeError` or a silently corrupt value.
+
+### Security
+
+- **Amount parsing can no longer crash or corrupt on overflow.**
+  `Amount::fromHrp()` / `Helpers` now parse the HRP amount with GMP and cap the
+  magnitude at the 21M BTC supply. A crafted large amount previously threw an
+  uncaught `TypeError` (via `Multiplier::toMsat()`) or stored a
+  scientific-notation `millisatoshis` string; both are reachable from
+  `Decoder::decode()`.
+- **Oversized `x`/`c` tags fail cleanly.** `Decoder` bounds the value of the
+  variable-length expiry / `min_final_cltv_expiry` fields with GMP; an over-long
+  field now throws `InvalidInvoiceException` instead of overflowing
+  `Bech32::wordsToInt()` to a float and raising a `TypeError`.
+- **Recovery rejects the point at infinity.** `Secp256k1Recovery` now refuses a
+  recovered key that is the identity point, which previously serialised as a
+  bogus `02`+64-zero node key and let a crafted signature decode as a complete
+  invoice.
+- **Decode length ceiling.** `Bech32::decode()` rejects inputs longer than
+  20,000 characters, preventing memory/CPU amplification from a checksum-valid
+  giant string.
+
+### Changed: BOLT 11 spec compliance
+
+- **Feature bits round-trip is now bit-identical.** `FeatureBits` preserves the
+  exact parsed words, so decode→encode no longer flips a required-only feature
+  into a required+optional pair (which would change the signed vector).
+- **Minimal / omitted `9` field on write.** The encoder strips leading zero
+  field-elements from the feature vector and omits the `9` field entirely when
+  it has no non-zero bits.
+- **More transitive feature dependencies enforced.** `option_route_blinding` and
+  `option_payment_metadata` now require `var_onion_optin`, alongside the existing
+  `basic_mpp` → `payment_secret` → `var_onion_optin` chain.
+- **Writer validation.** The encoder rejects fixed-length `p`/`s`/`h`/`n` tags
+  with the wrong byte length, out-of-range route-hint fee/cltv fields, and a
+  timestamp outside the 35-bit range. `Bech32::decode()` rejects HRP characters
+  outside the BIP-173 `[33,126]` range.
+- **Pico trailing-zero rule** is checked against the decimal string, not a lossy
+  integer cast.
+
+### Added
+
+- **Regression tests** (`tests/HardeningTest.php`) for every fix above.
+
 ## [0.2.0] — 2026-05-07
 
 A correctness, hardening, and tooling release. Focus areas: tightening

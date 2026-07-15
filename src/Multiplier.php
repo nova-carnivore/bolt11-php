@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Nova\Bitcoin\Bolt11;
 
+use GMP;
+use Nova\Bitcoin\Bolt11\Exception\InvalidAmountException;
+
 /**
  * BOLT 11 amount multiplier suffixes.
  *
@@ -18,19 +21,39 @@ enum Multiplier: string
     case Pico = 'p';  // 0.000000000001 BTC
 
     /**
-     * Convert an integer count of this multiplier's units to millisatoshis,
-     * using integer arithmetic only (no float precision loss).
+     * Convert an integer count of this multiplier's units to millisatoshis.
      *
-     * Pico amounts must be multiples of 10 — the caller is responsible for
+     * The multiplication is performed with GMP so it cannot overflow a native
+     * int (which would silently promote to float and, under strict_types,
+     * raise a TypeError from this `: int` return). If the result does not fit
+     * in a PHP int an InvalidAmountException is thrown instead.
+     *
+     * Pico amounts must be multiples of 10; the caller is responsible for
      * validating that before calling.
+     *
+     * @throws InvalidAmountException
      */
     public function toMsat(int $units): int
     {
+        $msat = $this->toMsatGmp(gmp_init($units));
+
+        if (gmp_cmp($msat, gmp_init(PHP_INT_MAX)) > 0) {
+            throw new InvalidAmountException('amount overflows integer range');
+        }
+
+        return gmp_intval($msat);
+    }
+
+    /**
+     * Convert a GMP unit count to millisatoshis as a GMP value (no overflow).
+     */
+    public function toMsatGmp(GMP $units): GMP
+    {
         return match ($this) {
-            self::Milli => $units * 100_000_000,
-            self::Micro => $units * 100_000,
-            self::Nano => $units * 100,
-            self::Pico => intdiv($units, 10),
+            self::Milli => gmp_mul($units, 100_000_000),
+            self::Micro => gmp_mul($units, 100_000),
+            self::Nano => gmp_mul($units, 100),
+            self::Pico => gmp_div_q($units, 10),
         };
     }
 

@@ -37,6 +37,11 @@ final readonly class Amount
     /**
      * Create an Amount from a parsed HRP amount string (e.g. "2500u", "20m", "10n").
      *
+     * Delegates to the overflow-safe Helpers parser: the returned
+     * millisatoshis is always a plain decimal-integer string (never a
+     * float-formatted value), and an oversized or malformed amount fails with
+     * InvalidAmountException rather than a TypeError.
+     *
      * @throws InvalidAmountException
      */
     public static function fromHrp(string $amountStr): self
@@ -45,23 +50,7 @@ final readonly class Amount
             throw new InvalidAmountException('Empty amount string');
         }
 
-        $lastChar = $amountStr[strlen($amountStr) - 1];
-        $multiplier = Multiplier::fromSuffix($lastChar);
-        $numStr = $multiplier !== null ? substr($amountStr, 0, -1) : $amountStr;
-
-        if ($numStr === '' || !preg_match('/^\d+$/', $numStr) || (strlen($numStr) > 1 && $numStr[0] === '0')) {
-            throw new InvalidAmountException(sprintf('Invalid amount: "%s"', $amountStr));
-        }
-
-        $num = (int) $numStr;
-
-        if ($multiplier === Multiplier::Pico && $num % 10 !== 0) {
-            throw new InvalidAmountException('pico-bitcoin amount must be a multiple of 10');
-        }
-
-        $msat = $multiplier?->toMsat($num) ?? $num * 100_000_000_000;
-
-        return new self((string) $msat);
+        return new self(Helpers::hrpToMillisat($amountStr));
     }
 
     /**

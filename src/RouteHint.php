@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nova\Bitcoin\Bolt11;
 
+use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
+
 /**
  * Represents a single hop in a route hint.
  *
@@ -19,6 +21,23 @@ final readonly class RouteHint
         public int $feeProportionalMillionths,
         public int $cltvExpiryDelta,
     ) {
+        // The wire fields have fixed widths; reject out-of-range values up
+        // front instead of silently truncating/wrapping them in toBytes().
+        if ($feeBaseMsat < 0 || $feeBaseMsat > 0xFFFFFFFF) {
+            throw new InvalidInvoiceException(
+                sprintf('feeBaseMsat must fit in 32 bits (0..4294967295), got %d', $feeBaseMsat),
+            );
+        }
+        if ($feeProportionalMillionths < 0 || $feeProportionalMillionths > 0xFFFFFFFF) {
+            throw new InvalidInvoiceException(
+                sprintf('feeProportionalMillionths must fit in 32 bits (0..4294967295), got %d', $feeProportionalMillionths),
+            );
+        }
+        if ($cltvExpiryDelta < 0 || $cltvExpiryDelta > 0xFFFF) {
+            throw new InvalidInvoiceException(
+                sprintf('cltvExpiryDelta must fit in 16 bits (0..65535), got %d', $cltvExpiryDelta),
+            );
+        }
     }
 
     /**

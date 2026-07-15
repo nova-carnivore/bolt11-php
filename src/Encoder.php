@@ -14,6 +14,9 @@ use Nova\Bitcoin\Bolt11\Exception\InvalidInvoiceException;
  */
 final class Encoder
 {
+    /** Maximum value of the 35-bit big-endian timestamp field (2^35 - 1). */
+    private const int MAX_TIMESTAMP = 34359738367;
+
     /**
      * Encode an unsigned BOLT 11 payment request.
      *
@@ -31,6 +34,14 @@ final class Encoder
         self::validateTags($tags);
 
         $timestamp ??= time();
+        // Timestamp is a 35-bit big-endian field; a value outside that range
+        // would be silently truncated/wrapped by Signer, producing a valid-
+        // looking invoice with a wrong timestamp. Reject it instead.
+        if ($timestamp < 0 || $timestamp > self::MAX_TIMESTAMP) {
+            throw new InvalidInvoiceException(
+                sprintf('timestamp must be within 0..%d (35-bit), got %d', self::MAX_TIMESTAMP, $timestamp),
+            );
+        }
         $hrp = self::buildHRP($network, $satoshis, $millisatoshis);
 
         $expiryTag = null;
@@ -101,6 +112,15 @@ final class Encoder
     {
         $words = [];
         foreach ($tags as $tag) {
+            // Spec: when the feature vector has no non-zero bits the `9` field
+            // MUST be omitted altogether.
+            if (
+                $tag->tagName === 'feature_bits'
+                && $tag->data instanceof FeatureBits
+                && self::minimalFeatureWords($tag->data) === []
+            ) {
+                continue;
+            }
             foreach (self::encodeTag($tag) as $w) {
                 $words[] = $w;
             }
@@ -155,7 +175,26 @@ final class Encoder
             throw new InvalidInvoiceException(sprintf('Tag %s data must be a hex string', $tag->tagName));
         }
 
-        return Bech32::eightToFive(Bech32::hexToBytes($tag->data));
+        $bytes = Bech32::hexToBytes($tag->data);
+
+        // Fixed-length fields (spec: p/s/h = 32 bytes, n = 33 bytes) MUST have
+        // the correct length, or every conformant reader rejects the invoice.
+        // Fail at the writer boundary instead of emitting a wrong data_length.
+        $expected = match ($tag->tagName) {
+            'payment_hash', 'payment_secret', 'purpose_commit_hash' => 32,
+            'payee' => 33,
+            default => null,
+        };
+        if ($expected !== null && count($bytes) !== $expected) {
+            throw new InvalidInvoiceException(sprintf(
+                '%s must be %d bytes, got %d',
+                $tag->tagName,
+                $expected,
+                count($bytes),
+            ));
+        }
+
+        return Bech32::eightToFive($bytes);
     }
 
     /**
@@ -222,7 +261,25 @@ final class Encoder
             throw new InvalidInvoiceException('Feature bits tag data must be a FeatureBits');
         }
 
-        return $tag->data->toWords();
+        return self::minimalFeatureWords($tag->data);
+    }
+
+    /**
+     * Feature-bits words with leading zero field-elements stripped. Spec: a
+     * non-empty `9` field MUST use the minimum data_length possible (no leading
+     * 0 field-elements). An all-zero vector yields an empty list, signalling to
+     * encodeAllTags that the field must be omitted.
+     *
+     * @return list<int>
+     */
+    private static function minimalFeatureWords(FeatureBits $fb): array
+    {
+        $words = $fb->toWords();
+        while ($words !== [] && $words[0] === 0) {
+            array_shift($words);
+        }
+
+        return $words;
     }
 
     /**

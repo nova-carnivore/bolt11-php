@@ -14,6 +14,13 @@ final class Helpers
     private const int MSAT_PER_BTC = 100_000_000_000; // 1e11
 
     /**
+     * Upper bound on a representable amount: the 21M BTC supply cap, in msat.
+     * No valid invoice can exceed this, and it keeps every parsed amount well
+     * within PHP's signed-int range so downstream int arithmetic is safe.
+     */
+    private const int MAX_MSAT = 2_100_000_000_000_000_000; // 21e6 BTC * 1e11
+
+    /**
      * Convert satoshis to an HRP amount string.
      *
      * Example: 250000 → "2500u"
@@ -86,13 +93,22 @@ final class Helpers
             return (string) intdiv($msat, 100) . 'n';
         }
 
-        // pico-bitcoin: 0.1 msat per unit (multiply by 10 to stay in int)
-        $picoVal = $msat * 10;
+        // pico-bitcoin: 0.1 msat per unit (multiply by 10). Use GMP so a large
+        // msat value cannot overflow to a float and emit scientific notation.
+        $picoVal = gmp_strval(gmp_mul(gmp_init($msat), 10));
 
         return $picoVal . 'p';
     }
 
     /**
+     * Parse an HRP amount string to millisatoshis.
+     *
+     * All arithmetic runs through GMP so an oversized amount cannot overflow a
+     * native int (which would raise a TypeError or store scientific notation).
+     * The magnitude is capped at the 21M BTC supply; anything larger, or any
+     * malformed amount, fails with InvalidAmountException. The result always
+     * fits in a PHP int.
+     *
      * @throws InvalidAmountException
      */
     private static function hrpToMillisatNum(string $amountStr): int
@@ -109,12 +125,23 @@ final class Helpers
             throw new InvalidAmountException(sprintf('Invalid amount: "%s"', $amountStr));
         }
 
-        $num = (int) $numStr;
-
-        if ($multiplier === Multiplier::Pico && $num % 10 !== 0) {
+        // Check the pico trailing-zero rule on the decimal string itself, not
+        // on a lossy (int) cast; a saturated int would give the wrong digit.
+        if ($multiplier === Multiplier::Pico && substr($numStr, -1) !== '0') {
             throw new InvalidAmountException('pico-bitcoin amount must be a multiple of 10');
         }
 
-        return $multiplier?->toMsat($num) ?? $num * self::MSAT_PER_BTC;
+        $units = gmp_init($numStr, 10);
+        $msat = $multiplier !== null
+            ? $multiplier->toMsatGmp($units)
+            : gmp_mul($units, self::MSAT_PER_BTC);
+
+        if (gmp_cmp($msat, gmp_init(self::MAX_MSAT)) > 0) {
+            throw new InvalidAmountException(
+                sprintf('Amount exceeds the maximum of %d msat: "%s"', self::MAX_MSAT, $amountStr),
+            );
+        }
+
+        return gmp_intval($msat);
     }
 }

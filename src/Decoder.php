@@ -205,9 +205,12 @@ final class Decoder
     }
 
     /**
-     * Enforce the BOLT 9 transitive-dependency chain that's relevant for
+     * Enforce the BOLT 9 transitive-dependency edges that are relevant for
      * invoice context:
-     *   basic_mpp (16/17) → payment_secret (14/15) → var_onion_optin (8/9)
+     *   basic_mpp (16/17)               → payment_secret (14/15)
+     *   payment_secret (14/15)          → var_onion_optin (8/9)
+     *   option_route_blinding (24/25)   → var_onion_optin (8/9)
+     *   option_payment_metadata (48/49) → var_onion_optin (8/9)
      *
      * If a feature is set (required OR supported), all its dependencies must
      * be set too (in either flavour). The spec phrases this as a payer-side
@@ -226,6 +229,16 @@ final class Decoder
         if ($isSet($fb->basicMpp) && !$isSet($fb->paymentSecret)) {
             throw new InvalidInvoiceException(
                 'BOLT 9 dependency violation: basic_mpp requires payment_secret',
+            );
+        }
+        if ($isSet($fb->optionRouteBlinding) && !$isSet($fb->varOnionOptin)) {
+            throw new InvalidInvoiceException(
+                'BOLT 9 dependency violation: option_route_blinding requires var_onion_optin',
+            );
+        }
+        if ($isSet($fb->optionPaymentMetadata) && !$isSet($fb->varOnionOptin)) {
+            throw new InvalidInvoiceException(
+                'BOLT 9 dependency violation: option_payment_metadata requires var_onion_optin',
             );
         }
     }
@@ -330,7 +343,32 @@ final class Decoder
     {
         self::ensureMinimalEncoding($name, $words);
 
-        return new Tag($name, Bech32::wordsToInt($words));
+        return new Tag($name, self::wordsToBoundedInt($name, $words));
+    }
+
+    /**
+     * Convert 5-bit words to an int for a variable-length integer tag (`x`,
+     * `c`), rejecting values that do not fit in a PHP int. The accumulation
+     * runs through GMP so a hostile over-long field fails with a domain
+     * exception instead of overflowing to a float and raising a TypeError
+     * from Bech32::wordsToInt (which is declared `: int`).
+     *
+     * @param list<int> $words
+     */
+    private static function wordsToBoundedInt(string $name, array $words): int
+    {
+        $result = gmp_init(0);
+        $max = gmp_init(PHP_INT_MAX);
+        foreach ($words as $word) {
+            $result = gmp_add(gmp_mul($result, 32), $word);
+            if (gmp_cmp($result, $max) > 0) {
+                throw new InvalidInvoiceException(
+                    sprintf('%s tag value is out of range', $name),
+                );
+            }
+        }
+
+        return gmp_intval($result);
     }
 
     /**

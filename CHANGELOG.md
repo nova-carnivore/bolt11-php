@@ -5,6 +5,42 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (BREAKING)
+
+- **`millisatoshis` is now an `int`, not a `string`.** `Amount::$millisatoshis`
+  and `Invoice::$millisatoshis` are typed `int` / `?int`. A BOLT 11 amount is
+  always a whole number of millisatoshis (the pico multiplier must be a multiple
+  of 10) and is capped at the 21M BTC supply, so it always fits in a 64-bit int.
+  The previous string typing was inconsistent with `satoshis` (already `?int`)
+  and was a footgun: strict (`===` / `!==`) comparison of a string against an
+  int silently never matches.
+  - **Migration:** compare numerically (`$invoice->millisatoshis === 1000`) and
+    drop any surrounding quotes. If you need a string (e.g. JSON APIs that model
+    msat as a string), call `Amount::millisatoshisString()` /
+    `Invoice::getMillisatoshisString()`.
+- **The 21M BTC cap is enforced on every `Amount` construction path**, not only
+  when decoding. `Amount::__construct`, `fromMillisatoshis`, and `fromSatoshis`
+  now reject negative or over-cap values with `InvalidAmountException`. The
+  `Amount::MAX_MSAT` constant is public.
+- **`Helpers::hrpToMillisat()` and `Helpers::hrpToSat()` now return `int`** (were
+  `string`), so the whole amount surface is consistent and free of the
+  string/int comparison footgun. (The reverse helpers `satToHrp` /
+  `millisatToHrp` still return the HRP amount string, which is genuinely a
+  string.) HRP-amount parsing moved into `Amount`, so `Helpers` depends on
+  `Amount` one-directionally (no cycle).
+
+### Added
+
+- **`Amount::millisatoshisString()`** and **`Invoice::getMillisatoshisString()`**
+  return the msat amount as a decimal string for interop.
+- **`Encoder::encode()` / `Encoder::buildHRP()` accept `int|string|null` for
+  `millisatoshis`** (widened from `?string`); a string is still accepted and
+  validated, so existing callers keep working.
+- **`tests/AmountTest.php`** covering the int typing, the interop accessor, and
+  cap enforcement across all construction paths.
+
 ## [0.3.0] — 2026-07-16
 
 A security and spec-compliance hardening pass, driven by a full review against

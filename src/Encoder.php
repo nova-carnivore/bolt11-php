@@ -26,7 +26,7 @@ final class Encoder
     public static function encode(
         Network $network = Network::Bitcoin,
         ?int $satoshis = null,
-        ?string $millisatoshis = null,
+        int|string|null $millisatoshis = null,
         array $tags = [],
         ?int $timestamp = null,
     ): Invoice {
@@ -54,17 +54,17 @@ final class Encoder
         $expireTime = $expiryTag ?? 3600;
         $timeExpireDate = $timestamp + $expireTime;
 
-        $sat = $satoshis;
-        $msat = $millisatoshis;
-        if ($sat !== null && $msat === null) {
-            $msat = (string) ($sat * 1000);
-        }
+        $msat = match (true) {
+            $millisatoshis !== null => Amount::fromMillisatoshis($millisatoshis)->millisatoshis,
+            $satoshis !== null => Amount::fromSatoshis($satoshis)->millisatoshis,
+            default => null,
+        };
 
         return new Invoice(
             complete: false,
             prefix: $hrp,
             network: $network,
-            satoshis: $sat,
+            satoshis: $satoshis,
             millisatoshis: $msat,
             timestamp: $timestamp,
             timestampString: gmdate('Y-m-d\TH:i:s\Z', $timestamp),
@@ -80,7 +80,7 @@ final class Encoder
     /**
      * Build the HRP string for a payment request.
      */
-    public static function buildHRP(Network $network, ?int $satoshis = null, ?string $millisatoshis = null): string
+    public static function buildHRP(Network $network, ?int $satoshis = null, int|string|null $millisatoshis = null): string
     {
         $hrp = 'ln' . $network->value;
 
@@ -89,9 +89,9 @@ final class Encoder
                 throw new InvalidAmountException('Amount must not be zero (use null for an any-amount invoice)');
             }
 
-            $hrp .= Helpers::msatToHrpString($satoshis * 1000);
+            $hrp .= Helpers::msatToHrpString(Amount::fromSatoshis($satoshis)->millisatoshis);
         } elseif ($millisatoshis !== null) {
-            $msat = (int) $millisatoshis;
+            $msat = Amount::fromMillisatoshis($millisatoshis)->millisatoshis;
             if ($msat === 0) {
                 throw new InvalidAmountException('Amount must not be zero (use null for an any-amount invoice)');
             }
@@ -283,16 +283,20 @@ final class Encoder
     }
 
     /**
-     * Reject negative satoshis and non-numeric / negative millisatoshis at
-     * the writer boundary. `(int) "abc"` quietly returns 0, which would
-     * otherwise make malformed strings look like valid amounts.
+     * Reject negative satoshis and non-numeric / negative millisatoshis at the
+     * writer boundary. A string millisatoshis (accepted for interop) is
+     * validated to be a plain non-negative decimal integer; `(int) "abc"`
+     * would otherwise quietly become 0 and look like a valid amount.
      */
-    private static function validateAmounts(?int $satoshis, ?string $millisatoshis): void
+    private static function validateAmounts(?int $satoshis, int|string|null $millisatoshis): void
     {
         if ($satoshis !== null && $satoshis < 0) {
             throw new InvalidAmountException('satoshis must not be negative');
         }
-        if ($millisatoshis !== null && !preg_match('/^\d+$/', $millisatoshis)) {
+        if (is_int($millisatoshis) && $millisatoshis < 0) {
+            throw new InvalidAmountException('millisatoshis must not be negative');
+        }
+        if (is_string($millisatoshis) && !preg_match('/^\d+$/', $millisatoshis)) {
             throw new InvalidAmountException(
                 sprintf('millisatoshis must be a non-negative integer string, got "%s"', $millisatoshis),
             );

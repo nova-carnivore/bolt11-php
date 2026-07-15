@@ -14,7 +14,7 @@ final readonly class Invoice
      * @param string $prefix The full HRP prefix (e.g. 'lnbc2500u')
      * @param Network|null $network The Bitcoin network
      * @param int|null $satoshis Amount in satoshis (null if sub-sat or no amount)
-     * @param string|null $millisatoshis Amount in millisatoshis as string
+     * @param int|null $millisatoshis Amount in millisatoshis (null if no amount)
      * @param int $timestamp Unix timestamp
      * @param string $timestampString ISO 8601 timestamp string
      * @param int|null $timeExpireDate Unix timestamp of expiry
@@ -30,7 +30,7 @@ final readonly class Invoice
         public string $prefix,
         public ?Network $network,
         public ?int $satoshis,
-        public ?string $millisatoshis,
+        public ?int $millisatoshis,
         public int $timestamp,
         public string $timestampString,
         public ?int $timeExpireDate,
@@ -41,6 +41,15 @@ final readonly class Invoice
         public array $tags,
         public ?string $paymentRequest = null,
     ) {
+    }
+
+    /**
+     * The millisatoshi amount as a decimal string (null for an any-amount
+     * invoice), for JSON / interop contexts that represent msat as a string.
+     */
+    public function getMillisatoshisString(): ?string
+    {
+        return $this->millisatoshis === null ? null : (string) $this->millisatoshis;
     }
 
     /**

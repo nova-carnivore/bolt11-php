@@ -42,7 +42,7 @@ use Nova\Bitcoin\Bolt11\Decoder;
 $invoice = Decoder::decode('lnbc2500u1pvjluez...');
 
 $invoice->satoshis;          // 250000
-$invoice->millisatoshis;     // '250000000'
+$invoice->millisatoshis;     // 250000000 (int; use getMillisatoshisString() for a string)
 $invoice->network;           // Network::Bitcoin
 $invoice->timestamp;         // 1496314658
 $invoice->payeeNodeKey;      // '03e7156ae33b...'
@@ -92,9 +92,9 @@ $signed->payeeNodeKey;   // compressed public key
 use Nova\Bitcoin\Bolt11\Helpers;
 
 Helpers::satToHrp(250000);       // '2500u'
-Helpers::hrpToSat('2500u');      // '250000'
+Helpers::hrpToSat('2500u');      // 250000 (int)
 Helpers::millisatToHrp('1000');  // '10n'
-Helpers::hrpToMillisat('10n');   // '1000'
+Helpers::hrpToMillisat('10n');   // 1000 (int)
 ```
 
 ## API Reference
@@ -111,7 +111,7 @@ Creates an unsigned invoice. Parameters:
 |-----------|------|---------|-------------|
 | `network` | `Network` | `Network::Bitcoin` | Target network |
 | `satoshis` | `?int` | `null` | Amount in satoshis |
-| `millisatoshis` | `?string` | `null` | Amount in millisatoshis |
+| `millisatoshis` | `int\|string\|null` | `null` | Amount in millisatoshis (a string is accepted for interop and validated) |
 | `tags` | `array<Tag>` | `[]` | Tagged fields |
 | `timestamp` | `?int` | `null` | Unix timestamp (defaults to now) |
 
@@ -127,7 +127,7 @@ Signs an unsigned invoice with a secp256k1 private key.
 | `prefix` | `string` | Full HRP (e.g. `lnbc2500u`) |
 | `network` | `?Network` | Bitcoin network enum |
 | `satoshis` | `?int` | Amount in satoshis |
-| `millisatoshis` | `?string` | Amount in millisatoshis |
+| `millisatoshis` | `?int` | Amount in millisatoshis (see `getMillisatoshisString()` for a string form) |
 | `timestamp` | `int` | Unix timestamp |
 | `payeeNodeKey` | `?string` | Compressed public key (hex) |
 | `signature` | `string` | 64-byte compact signature (hex) |

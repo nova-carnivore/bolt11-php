@@ -88,11 +88,12 @@ final class HardeningTest extends TestCase
         Decoder::decode($invoice);
     }
 
-    public function testAmountFromHrpNeverReturnsFloatString(): void
+    public function testAmountFromHrpReturnsExactInt(): void
     {
-        // Just under the 21M BTC cap stays a plain decimal string.
+        // 20999999m = 20999999 * 1e8 msat; a plain int, never a float string.
         $amount = Amount::fromHrp('20999999m');
-        self::assertMatchesRegularExpression('/^\d+$/', $amount->millisatoshis);
+        self::assertSame(2099999900000000, $amount->millisatoshis);
+        self::assertSame('2099999900000000', $amount->millisatoshisString());
     }
 
     public function testAmountAboveSupplyCapRejected(): void

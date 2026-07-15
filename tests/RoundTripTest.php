@@ -91,7 +91,8 @@ final class RoundTripTest extends TestCase
         self::assertNotNull($signed->paymentRequest);
         $decoded = Decoder::decode($signed->paymentRequest);
 
-        self::assertSame('967878534', $decoded->millisatoshis);
+        self::assertSame(967878534, $decoded->millisatoshis);
+        self::assertSame('967878534', $decoded->getMillisatoshisString());
         self::assertNull($decoded->satoshis);
     }
 

@@ -86,27 +86,27 @@ final class HelpersTest extends TestCase
 
     public function testHrpToSat2500u(): void
     {
-        self::assertSame('250000', Helpers::hrpToSat('2500u'));
+        self::assertSame(250000, Helpers::hrpToSat('2500u'));
     }
 
     public function testHrpToSat20m(): void
     {
-        self::assertSame('2000000', Helpers::hrpToSat('20m'));
+        self::assertSame(2000000, Helpers::hrpToSat('20m'));
     }
 
     public function testHrpToSat25m(): void
     {
-        self::assertSame('2500000', Helpers::hrpToSat('25m'));
+        self::assertSame(2500000, Helpers::hrpToSat('25m'));
     }
 
     public function testHrpToSat10u(): void
     {
-        self::assertSame('1000', Helpers::hrpToSat('10u'));
+        self::assertSame(1000, Helpers::hrpToSat('10u'));
     }
 
     public function testHrpToSat10n(): void
     {
-        self::assertSame('1', Helpers::hrpToSat('10n'));
+        self::assertSame(1, Helpers::hrpToSat('10n'));
     }
 
     public function testHrpToSatFractionalThrows(): void
@@ -121,32 +121,32 @@ final class HelpersTest extends TestCase
 
     public function testHrpToMillisat2500u(): void
     {
-        self::assertSame('250000000', Helpers::hrpToMillisat('2500u'));
+        self::assertSame(250000000, Helpers::hrpToMillisat('2500u'));
     }
 
     public function testHrpToMillisat20m(): void
     {
-        self::assertSame('2000000000', Helpers::hrpToMillisat('20m'));
+        self::assertSame(2000000000, Helpers::hrpToMillisat('20m'));
     }
 
     public function testHrpToMillisat9678785340p(): void
     {
-        self::assertSame('967878534', Helpers::hrpToMillisat('9678785340p'));
+        self::assertSame(967878534, Helpers::hrpToMillisat('9678785340p'));
     }
 
     public function testHrpToMillisat10n(): void
     {
-        self::assertSame('1000', Helpers::hrpToMillisat('10n'));
+        self::assertSame(1000, Helpers::hrpToMillisat('10n'));
     }
 
     public function testHrpToMillisat1n(): void
     {
-        self::assertSame('100', Helpers::hrpToMillisat('1n'));
+        self::assertSame(100, Helpers::hrpToMillisat('1n'));
     }
 
     public function testHrpToMillisat10p(): void
     {
-        self::assertSame('1', Helpers::hrpToMillisat('10p'));
+        self::assertSame(1, Helpers::hrpToMillisat('10p'));
     }
 
     public function testHrpToMillisatEmptyThrows(): void

@@ -49,7 +49,7 @@ final class SpecVectorsTest extends TestCase
 
         self::assertSame('bc', $d->network?->value);
         self::assertSame(250000, $d->satoshis);
-        self::assertSame('250000000', $d->millisatoshis);
+        self::assertSame(250000000, $d->millisatoshis);
         self::assertSame(self::SPEC_PAYMENT_HASH, $d->getPaymentHash());
         self::assertSame(self::SPEC_PAYMENT_SECRET, $d->getPaymentSecret());
         self::assertSame('1 cup coffee', $d->getDescription());
@@ -69,7 +69,7 @@ final class SpecVectorsTest extends TestCase
         );
 
         self::assertSame(250000, $d->satoshis);
-        self::assertSame('250000000', $d->millisatoshis);
+        self::assertSame(250000000, $d->millisatoshis);
         self::assertSame('ナンセンス 1杯', $d->getDescription());
         self::assertSame(self::SPEC_PUBKEY, $d->payeeNodeKey);
     }
@@ -81,7 +81,7 @@ final class SpecVectorsTest extends TestCase
         );
 
         self::assertSame(2000000, $d->satoshis);
-        self::assertSame('2000000000', $d->millisatoshis);
+        self::assertSame(2000000000, $d->millisatoshis);
         self::assertSame(
             '3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1',
             $d->getDescriptionHash(),
@@ -198,7 +198,7 @@ final class SpecVectorsTest extends TestCase
             'lnbc9678785340p1pwmna7lpp5gc3xfm08u9qy06djf8dfflhugl6p7lgza6dsjxq454gxhj9t7a0sd8dgfkx7cmtwd68yetpd5s9xar0wfjn5gpc8qhrsdfq24f5ggrxdaezqsnvda3kkum5wfjkzmfqf3jkgem9wgsyuctwdus9xgrcyqcjcgpzgfskx6eqf9hzqnteypzxz7fzypfhg6trddjhygrcyqezcgpzfysywmm5ypxxjemgw3hxjmn8yptk7untd9hxwg3q2d6xjcmtv4ezq7pqxgsxzmnyyqcjqmt0wfjjq6t5v4khxsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygsxqyjw5qcqp2rzjq0gxwkzc8w6323m55m4jyxcjwmy7stt9hwkwe2qxmy8zpsgg7jcuwz87fcqqeuqqqyqqqqlgqqqqn3qq9q9qrsgqrvgkpnmps664wgkp43l22qsgdw4ve24aca4nymnxddlnp8vh9v2sdxlu5ywdxefsfvm0fq3sesf08uf6q9a2ke0hc9j6z6wlxg5z5kqpu2v9wz',
         );
 
-        self::assertSame('967878534', $d->millisatoshis);
+        self::assertSame(967878534, $d->millisatoshis);
         self::assertNull($d->satoshis);
         self::assertSame(
             '462264ede7e14047e9b249da94fefc47f41f7d02ee9b091815a5506bc8abf75f',
